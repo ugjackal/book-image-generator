@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character PNG Generator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="backdrop backdrop-a"></div>
+    <div class="backdrop backdrop-b"></div>
+
+    <main class="app-shell">
+      <header class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">First character setup</p>
+          <h1>Generate the first main character as a transparent PNG.</h1>
+          <p class="hero-text">
+            Upload the cover, describe the lead character, and we will send the
+            cover as a visual reference so the first PNG can anchor the art
+            style for later characters.
+          </p>
+        </div>
+        <div class="hero-stats" id="heroStats"></div>
+      </header>
+
+      <section class="grid">
+        <section class="panel cover-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Reference</p>
+              <h2>Upload the book cover</h2>
+            </div>
+            <button class="ghost-button" id="clearCoverButton" type="button">Clear</button>
+          </div>
+
+          <label class="dropzone" id="dropzone">
+            <input id="coverInput" type="file" accept="image/*" hidden />
+            <span class="dropzone-title">Drop the cover here or browse</span>
+            <span class="dropzone-subtitle">
+              The cover is resized locally and sent to OpenAI as a visual
+              reference for the first character PNG.
+            </span>
+          </label>
+
+          <div class="cover-preview" id="coverPreview">
+            <div class="cover-placeholder">
+              <span>No cover loaded yet</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel prompt-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Character brief</p>
+              <h2>Describe the first main character</h2>
+            </div>
+          </div>
+
+          <form id="characterForm" class="form-grid">
+            <label class="field span-2">
+              <span>Project title</span>
+              <input id="projectTitle" type="text" placeholder="Book title" />
+            </label>
+
+            <label class="field">
+              <span>Character name</span>
+              <input id="characterName" type="text" placeholder="Character name" />
+            </label>
+
+            <label class="field">
+              <span>Role / type</span>
+              <input id="characterRole" type="text" placeholder="Protagonist, sibling, sheep..." />
+            </label>
+
+            <label class="field span-2">
+              <span>Visual traits</span>
+              <textarea
+                id="visualTraits"
+                rows="3"
+                placeholder="Shape, species, age, silhouette, color palette, wardrobe, and signature details..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
+              <span>Distinctive anatomy</span>
+              <textarea
+                id="distinctiveAnatomy"
+                rows="2"
+                placeholder="Unusual physical details that must stay consistent..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
+              <span>Expression and pose</span>
+              <textarea
+                id="expressionPose"
+                rows="3"
+                placeholder="What the character should be doing or feeling in the first canonical image..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
+              <span>Style lock notes</span>
+              <textarea
+                id="styleNotes"
+                rows="3"
+                placeholder="Anything that must stay consistent across every future image..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
+              <span>Cover story notes</span>
+              <textarea
+                id="coverStoryNotes"
+                rows="3"
+                placeholder="Who is on the cover, what they are doing, and how they relate to each other..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
+              <span>Generation seed</span>
+              <input
+                id="promptSeed"
+                type="text"
+                placeholder="Optional extra phrase to push the image direction"
+              />
+            </label>
+
+            <div class="button-row span-2">
+              <button class="primary-button" id="generateButton" type="submit">
+                Generate PNG
+              </button>
+              <button class="ghost-button" id="loadExampleButton" type="button">
+                Load Harvey preset
+              </button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section class="panel result-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Result</p>
+            <h2>Generated first character</h2>
+          </div>
+          <div class="button-row">
+            <a class="ghost-button" id="downloadButton" href="#" download="first-character.png" hidden>
+              Download PNG
+            </a>
+            <button class="ghost-button" id="copyPromptButton" type="button" disabled>
+              Copy prompt
+            </button>
+          </div>
+        </div>
+
+        <div class="result-layout">
+          <div class="result-preview" id="resultPreview">
+            <div class="cover-placeholder">
+              <span>Generate a PNG to see the first main character here.</span>
+            </div>
+          </div>
+
+          <div class="result-meta">
+            <div class="status-card">
+              <strong id="statusLabel">Ready</strong>
+              <span id="statusText">Upload a cover and describe the character, then generate the first PNG.</span>
+            </div>
+
+            <label class="field">
+              <span>Prompt used</span>
+              <textarea id="promptOutput" rows="12" readonly></textarea>
+            </label>
+
+            <label class="field">
+              <span>Notes</span>
+              <textarea id="notesOutput" rows="6" readonly></textarea>
+            </label>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

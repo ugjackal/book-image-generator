@@ -84,6 +84,15 @@
             </label>
 
             <label class="field span-2">
+              <span>Birth state</span>
+              <textarea
+                id="birthState"
+                rows="3"
+                placeholder="How the character should look and move in their canonical young form..."
+              ></textarea>
+            </label>
+
+            <label class="field span-2">
               <span>Distinctive anatomy</span>
               <textarea
                 id="distinctiveAnatomy"
@@ -178,6 +187,51 @@
               <span>Notes</span>
               <textarea id="notesOutput" rows="6" readonly></textarea>
             </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel flipbook-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Flipbook</p>
+            <h2>Quick slideshow for animation</h2>
+            <p class="hero-text">
+              Flip through the saved PNGs quickly to show how motion changes frame by frame.
+            </p>
+          </div>
+          <div class="button-row">
+            <button class="ghost-button" id="refreshFlipbookButton" type="button">Refresh frames</button>
+            <button class="ghost-button" id="prevFrameButton" type="button">Prev</button>
+            <button class="primary-button" id="playFlipbookButton" type="button">Play</button>
+            <button class="ghost-button" id="nextFrameButton" type="button">Next</button>
+          </div>
+        </div>
+
+        <div class="flipbook-layout">
+          <div class="flipbook-stage" id="flipbookStage">
+            <div class="cover-placeholder">
+              <span>Load or generate PNGs to build the flipbook.</span>
+            </div>
+          </div>
+
+          <div class="flipbook-meta">
+            <div class="status-card">
+              <strong id="flipbookTitle">No frames loaded</strong>
+              <span id="flipbookStatus">The slideshow will use PNGs from the outputs folder.</span>
+            </div>
+
+            <label class="field">
+              <span>Flip speed</span>
+              <input id="flipbookSpeed" type="range" min="60" max="500" step="20" value="160" />
+            </label>
+
+            <div class="status-card">
+              <strong>How it teaches animation</strong>
+              <span>
+                The same characters move just a little between frames, so readers can see how timing changes the feeling of motion.
+              </span>
+            </div>
           </div>
         </div>
       </section>

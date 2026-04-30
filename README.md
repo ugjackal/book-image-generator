@@ -8,6 +8,7 @@ A small local app for generating the first canonical main character as a transpa
 - Start with Harvey, the cat from the cover, and keep Marlin in the cover notes as the horse companion.
 - Generate a transparent PNG and save it locally in `outputs/`.
 - Reuse the generated prompt as the style anchor for future characters.
+- Launching `serve.bat` also mirrors today's Codex-generated PNGs into `outputs/` automatically.
 
 ## How to use
 
@@ -21,3 +22,4 @@ A small local app for generating the first canonical main character as a transpa
 - The browser only talks to the local Python server.
 - The Python server calls the OpenAI API and writes the resulting PNG to `outputs/`.
 - The generated PNG is transparent so it can be reused in later scene layouts.
+- The sync script copies Codex chat-generated PNGs from the local cache into `outputs/` on startup, so the repo stays in step with the latest art.

@@ -54,10 +54,14 @@ def build_prompt(payload: dict[str, Any]) -> str:
     project_title = str(payload.get("project_title", "")).strip() or "Untitled book"
     character_name = str(payload.get("character_name", "")).strip() or "First main character"
     character_role = str(payload.get("character_role", "")).strip() or "Protagonist"
-    visual_traits = str(payload.get("visual_traits", "")).strip()
-    distinctive_anatomy = str(payload.get("distinctive_anatomy", "")).strip()
-    expression_pose = str(payload.get("expression_pose", "")).strip()
-    style_notes = str(payload.get("style_notes", "")).strip()
+    group_name = str(payload.get("group_name", "")).strip()
+    character_profile = load_character_profile(character_name)
+    group_profile = load_character_profile(group_name) if group_name else {}
+    visual_traits = str(payload.get("visual_traits", "")).strip() or str(character_profile.get("visualTraits", "")).strip()
+    birth_state = str(payload.get("birth_state", "")).strip() or str(character_profile.get("birthState", "")).strip()
+    distinctive_anatomy = str(payload.get("distinctive_anatomy", "")).strip() or str(character_profile.get("distinctiveAnatomy", "")).strip()
+    expression_pose = str(payload.get("expression_pose", "")).strip() or str(character_profile.get("expressionPose", "")).strip()
+    style_notes = str(payload.get("style_notes", "")).strip() or str(character_profile.get("styleNotes", "")).strip()
     cover_story_notes = str(payload.get("cover_story_notes", "")).strip()
     prompt_seed = str(payload.get("prompt_seed", "")).strip()
 
@@ -74,12 +78,20 @@ def build_prompt(payload: dict[str, Any]) -> str:
 
     if visual_traits:
         lines.append(f"Visual traits: {visual_traits}.")
+    if birth_state:
+        lines.append(f"Birth state: {birth_state}.")
     if distinctive_anatomy:
         lines.append(f"Distinctive anatomy: {distinctive_anatomy}.")
     if expression_pose:
         lines.append(f"Expression and pose: {expression_pose}.")
     if style_notes:
         lines.append(f"Style lock notes: {style_notes}.")
+    if group_name and group_profile:
+        lines.append(f"Group name: {group_name}.")
+        if group_profile.get("groupIdentity"):
+            lines.append(f"Group identity: {group_profile.get('groupIdentity')}.")
+        if group_profile.get("familyNotes"):
+            lines.append(f"Family notes: {group_profile.get('familyNotes')}.")
     if cover_story_notes:
         lines.append(f"Cover story notes: {cover_story_notes}.")
     if prompt_seed:
@@ -119,12 +131,34 @@ def load_scene_style() -> dict[str, Any]:
 class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
     server_version = "CharacterPNGGenerator/1.0"
 
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/outputs":
+            self.handle_list_outputs()
+            return
+        super().do_GET()
+
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/generate-character":
             self.handle_generate_character()
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
+
+    def handle_list_outputs(self) -> None:
+        if not OUTPUT_DIR.exists():
+            self.send_json(HTTPStatus.OK, {"files": []})
+            return
+
+        files = [
+            {
+                "name": path.name,
+                "url": f"/outputs/{path.name}",
+                "last_modified": path.stat().st_mtime,
+            }
+            for path in sorted(OUTPUT_DIR.glob("*.png"), key=lambda item: item.stat().st_mtime)
+        ]
+        self.send_json(HTTPStatus.OK, {"files": files})
 
     def handle_generate_character(self) -> None:
         api_key = os.environ.get("OPENAI_API_KEY")

@@ -14,6 +14,7 @@ const refs = {
   characterName: $("#characterName"),
   characterRole: $("#characterRole"),
   visualTraits: $("#visualTraits"),
+  birthState: $("#birthState"),
   distinctiveAnatomy: $("#distinctiveAnatomy"),
   expressionPose: $("#expressionPose"),
   styleNotes: $("#styleNotes"),
@@ -24,6 +25,14 @@ const refs = {
   resultPreview: $("#resultPreview"),
   downloadButton: $("#downloadButton"),
   copyPromptButton: $("#copyPromptButton"),
+  refreshFlipbookButton: $("#refreshFlipbookButton"),
+  prevFrameButton: $("#prevFrameButton"),
+  playFlipbookButton: $("#playFlipbookButton"),
+  nextFrameButton: $("#nextFrameButton"),
+  flipbookStage: $("#flipbookStage"),
+  flipbookTitle: $("#flipbookTitle"),
+  flipbookStatus: $("#flipbookStatus"),
+  flipbookSpeed: $("#flipbookSpeed"),
   statusLabel: $("#statusLabel"),
   statusText: $("#statusText"),
   promptOutput: $("#promptOutput"),
@@ -35,8 +44,10 @@ const defaultState = () => ({
   characterName: "Harvey",
   characterRole: "Cat protagonist",
   visualTraits:
-    "A small tabby cat with warm brown stripes, a soft fluffy coat, bright eyes, and an easy-to-read storybook silhouette.",
-  distinctiveAnatomy: "Harvey is polydactyl and has seven toes.",
+    "A small tabby kitten with warm brown stripes, a soft fluffy coat, bright eyes, and an easy-to-read storybook silhouette.",
+  birthState:
+    "Harvey's canonical birth state is a young kitten with wobbly beginnings, back legs bent a little sideways, and front paws that bend inward so he bears weight on his front wrists. He waddles forward with a gorilla-like gait. Harvey has six toes on each paw.",
+  distinctiveAnatomy: "Harvey has six toes on each paw, with inward-bending front paws and a wrist-led walk.",
   expressionPose:
     "Walking forward on a road with a calm, curious expression, as if heading into the next chapter.",
   styleNotes:
@@ -49,6 +60,11 @@ const defaultState = () => ({
   coverPreviewUrl: "",
   coverReferenceUrl: "",
   generatedImageUrl: "",
+  outputFiles: [],
+  flipbookIndex: 0,
+  flipbookPlaying: false,
+  flipbookDelay: 160,
+  flipbookTimer: null,
   lastPrompt: "",
   lastNotes: "",
   status: "Ready",
@@ -69,6 +85,11 @@ function loadState() {
       coverPreviewUrl: "",
       coverReferenceUrl: "",
       generatedImageUrl: "",
+      outputFiles: [],
+      flipbookIndex: 0,
+      flipbookPlaying: false,
+      flipbookDelay: 160,
+      flipbookTimer: null,
       lastPrompt: "",
       lastNotes: "",
       status: "Ready",
@@ -85,6 +106,11 @@ function saveState() {
     coverPreviewUrl,
     coverReferenceUrl,
     generatedImageUrl,
+    outputFiles,
+    flipbookIndex,
+    flipbookPlaying,
+    flipbookDelay,
+    flipbookTimer,
     lastPrompt,
     lastNotes,
     status,
@@ -111,6 +137,7 @@ function renderState() {
   refs.characterName.value = state.characterName;
   refs.characterRole.value = state.characterRole;
   refs.visualTraits.value = state.visualTraits;
+  refs.birthState.value = state.birthState;
   refs.distinctiveAnatomy.value = state.distinctiveAnatomy;
   refs.expressionPose.value = state.expressionPose;
   refs.styleNotes.value = state.styleNotes;
@@ -133,6 +160,7 @@ function renderState() {
   refs.copyPromptButton.disabled = !state.lastPrompt;
 
   renderHeroStats();
+  renderFlipbook();
 }
 
 function renderHeroStats() {
@@ -141,6 +169,39 @@ function renderHeroStats() {
     statCard(state.characterName || "Unnamed character", "This will be the first canonical character PNG."),
     statCard(state.status, state.statusDetail),
   ].join("");
+}
+
+function renderFlipbook() {
+  const files = state.outputFiles || [];
+  refs.flipbookSpeed.value = String(state.flipbookDelay);
+
+  if (!files.length) {
+    refs.flipbookStage.innerHTML = `<div class="cover-placeholder"><span>No frames found yet.</span></div>`;
+    refs.flipbookTitle.textContent = "No frames loaded";
+    refs.flipbookStatus.textContent = "Refresh the outputs folder or generate new PNGs to build the slideshow.";
+    refs.playFlipbookButton.textContent = "Play";
+    refs.playFlipbookButton.disabled = true;
+    refs.prevFrameButton.disabled = true;
+    refs.nextFrameButton.disabled = true;
+    refs.refreshFlipbookButton.disabled = false;
+    return;
+  }
+
+  const index = ((state.flipbookIndex % files.length) + files.length) % files.length;
+  const current = files[index];
+  refs.flipbookStage.innerHTML = `
+    <img src="${current.url}" alt="${escapeHtml(current.name)}" />
+    <div class="flipbook-counter">${index + 1} / ${files.length}</div>
+  `;
+  refs.flipbookTitle.textContent = current.name;
+  refs.flipbookStatus.textContent = state.flipbookPlaying
+    ? "Autoplay is running. Use Prev/Next to step through frames."
+    : "Use Play to cycle frames quickly like a flipbook.";
+  refs.playFlipbookButton.textContent = state.flipbookPlaying ? "Pause" : "Play";
+  refs.playFlipbookButton.disabled = false;
+  refs.prevFrameButton.disabled = false;
+  refs.nextFrameButton.disabled = false;
+  refs.refreshFlipbookButton.disabled = false;
 }
 
 function statCard(title, detail) {
@@ -243,6 +304,7 @@ async function generateCharacter(event) {
     character_name: state.characterName,
     character_role: state.characterRole,
     visual_traits: state.visualTraits,
+    birth_state: state.birthState,
     distinctive_anatomy: state.distinctiveAnatomy,
     expression_pose: state.expressionPose,
     style_notes: state.styleNotes,
@@ -279,6 +341,7 @@ async function generateCharacter(event) {
     setStatus("Done", "The first canonical character PNG is ready.");
     saveState();
     renderState();
+    await refreshFlipbookFrames({ focusLatest: true });
   } catch (error) {
     setStatus("Error", error.message || "Something went wrong while generating the PNG.");
   } finally {
@@ -292,6 +355,7 @@ function loadExample() {
   state.characterName = preset.characterName;
   state.characterRole = preset.characterRole;
   state.visualTraits = preset.visualTraits;
+  state.birthState = preset.birthState;
   state.distinctiveAnatomy = preset.distinctiveAnatomy;
   state.expressionPose = preset.expressionPose;
   state.styleNotes = preset.styleNotes;
@@ -303,6 +367,72 @@ function loadExample() {
   setStatus("Preset loaded", "You can generate Harvey's first canonical PNG from these starter values.");
   saveState();
   renderState();
+}
+
+async function refreshFlipbookFrames({ focusLatest = false } = {}) {
+  try {
+    const response = await fetch("/api/outputs");
+    if (!response.ok) throw new Error("Unable to load slideshow frames.");
+    const result = await response.json();
+    state.outputFiles = Array.isArray(result.files) ? result.files : [];
+    if (!state.outputFiles.length) {
+      state.flipbookPlaying = false;
+      stopFlipbookTimer();
+    }
+    if (focusLatest && state.outputFiles.length) {
+      state.flipbookIndex = state.outputFiles.length - 1;
+    } else if (state.flipbookIndex >= state.outputFiles.length) {
+      state.flipbookIndex = 0;
+    }
+    saveState();
+    renderFlipbook();
+    if (state.flipbookPlaying) {
+      startFlipbookTimer();
+    }
+  } catch (error) {
+    state.outputFiles = [];
+    state.flipbookIndex = 0;
+    state.flipbookPlaying = false;
+    stopFlipbookTimer();
+    saveState();
+    setStatus("Flipbook error", error.message || "Could not refresh the slideshow frames.");
+    renderFlipbook();
+  }
+}
+
+function stepFlipbook(direction) {
+  if (!state.outputFiles.length) return;
+  state.flipbookIndex = (state.flipbookIndex + direction + state.outputFiles.length) % state.outputFiles.length;
+  saveState();
+  renderFlipbook();
+}
+
+function setFlipbookPlaying(playing) {
+  state.flipbookPlaying = playing;
+  if (playing) {
+    startFlipbookTimer();
+  } else {
+    stopFlipbookTimer();
+  }
+  saveState();
+  renderFlipbook();
+}
+
+function stopFlipbookTimer() {
+  if (state.flipbookTimer) {
+    clearInterval(state.flipbookTimer);
+    state.flipbookTimer = null;
+  }
+}
+
+function startFlipbookTimer() {
+  stopFlipbookTimer();
+  if (!state.outputFiles.length) return;
+  state.flipbookTimer = setInterval(() => {
+    if (!state.flipbookPlaying || !state.outputFiles.length) return;
+    state.flipbookIndex = (state.flipbookIndex + 1) % state.outputFiles.length;
+    renderFlipbook();
+  }, state.flipbookDelay);
 }
 
 refs.coverInput.addEventListener("change", async (event) => {
@@ -349,6 +479,7 @@ refs.characterForm.addEventListener("input", (event) => {
     characterName: "characterName",
     characterRole: "characterRole",
     visualTraits: "visualTraits",
+    birthState: "birthState",
     distinctiveAnatomy: "distinctiveAnatomy",
     expressionPose: "expressionPose",
     styleNotes: "styleNotes",
@@ -375,5 +506,20 @@ refs.copyPromptButton.addEventListener("click", async () => {
   }
 });
 
+refs.refreshFlipbookButton.addEventListener("click", refreshFlipbookFrames);
+refs.prevFrameButton.addEventListener("click", () => stepFlipbook(-1));
+refs.nextFrameButton.addEventListener("click", () => stepFlipbook(1));
+refs.playFlipbookButton.addEventListener("click", () => setFlipbookPlaying(!state.flipbookPlaying));
+refs.flipbookSpeed.addEventListener("input", (event) => {
+  const value = Number(event.target.value);
+  if (!Number.isFinite(value)) return;
+  state.flipbookDelay = value;
+  saveState();
+  if (state.flipbookPlaying) {
+    startFlipbookTimer();
+  }
+});
+
 renderState();
 loadDefaultCover();
+refreshFlipbookFrames();

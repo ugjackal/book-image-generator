@@ -211,7 +211,7 @@ def build_prompt(payload: dict[str, Any]) -> str:
         f"Create the first canonical main character for the picture book '{project_title}'.",
         f"Character name: {character_name}.",
         f"Role: {character_role}.",
-        "Make this a clean, reusable character reference PNG with a transparent background.",
+        "Make this a clean, reusable character reference PNG with a simple plain background.",
         "Keep the whole body visible and the silhouette easy to recognize at a glance.",
         "Use the book's locked children's-book illustration style.",
         "Preserve the cover's visual language, mood, palette, texture, softness, and simplified shapes.",
@@ -530,7 +530,7 @@ def generate_character_image(payload: dict[str, Any]) -> dict[str, Any]:
         file_prefix=character_name,
         cover_data_url=cover_data_url,
         reference_data_urls=[reference for reference in [seed_image_data_url] if reference and reference != cover_data_url],
-        background="transparent",
+        background="auto",
         size="1024x1536",
     )
     if payload.get("save_profile") or payload.get("saveProfile"):

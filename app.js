@@ -215,6 +215,7 @@ let stateSaveTimer = null;
 let activeCharacterName = "";
 let characterDraft = null;
 let characterEditorOpen = false;
+let characterThumbnailGenerating = false;
 
 function normalizeLoadedState(parsed) {
   const fallback = defaultState();
@@ -944,6 +945,26 @@ function setGenerating(isGenerating, pageId = "") {
   renderBookPreview();
 }
 
+function setThumbnailButtonLoading(isLoading) {
+  const button = refs.generateCharacterThumbnailButton;
+  if (!button) return;
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = button.textContent || "Generate thumbnail";
+  }
+  if (isLoading) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.innerHTML = `
+      <span class="button-loading-icon" aria-hidden="true"></span>
+      <span>${escapeHtml("Generating...")}</span>
+    `;
+  } else {
+    button.classList.remove("is-loading");
+    button.disabled = !characterDraft?.name?.trim();
+    button.textContent = button.dataset.defaultLabel || "Generate thumbnail";
+  }
+}
+
 function revokeBlobUrl(url) {
   if (typeof url === "string" && url.startsWith("blob:")) {
     try {
@@ -1257,6 +1278,11 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
   }
   if (refs.generateCharacterThumbnailButton) {
     refs.generateCharacterThumbnailButton.disabled = !draft.name.trim();
+    if (characterThumbnailGenerating) {
+      setThumbnailButtonLoading(true);
+    } else {
+      setThumbnailButtonLoading(false);
+    }
   }
 }
 
@@ -1729,24 +1755,31 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     payload.cover_data_url = book.coverReferenceUrl || book.coverPreviewUrl || "";
     payload.seed_image_data_url = draft.seedImageDataUrl || draft.seedImageUrl || "";
 
+    characterThumbnailGenerating = true;
+    setThumbnailButtonLoading(true);
     setStatus("Generating thumbnail", `Creating a character thumbnail for ${name}.`);
-    const response = await fetch("/api/generate-character", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || "Character thumbnail generation failed.");
+    try {
+      const response = await fetch("/api/generate-character", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Character thumbnail generation failed.");
+      }
+      characterDraft.thumbnailUrl = result.file_url || "";
+      characterDraft.seedImageUrl = result.seedImageUrl || characterDraft.seedImageUrl;
+      characterDraft.seedImageDataUrl = "";
+      characterDraft.seedImageFileName = "";
+      characterDraft.originalName = name;
+      characterDraft.isNew = false;
+      activeCharacterName = name;
+      setStatus("Thumbnail ready", `${name} now has a styled character thumbnail.`);
+    } finally {
+      characterThumbnailGenerating = false;
+      setThumbnailButtonLoading(false);
     }
-    characterDraft.thumbnailUrl = result.file_url || "";
-    characterDraft.seedImageUrl = result.seedImageUrl || characterDraft.seedImageUrl;
-    characterDraft.seedImageDataUrl = "";
-    characterDraft.seedImageFileName = "";
-    characterDraft.originalName = name;
-    characterDraft.isNew = false;
-    activeCharacterName = name;
-    setStatus("Thumbnail ready", `${name} now has a styled character thumbnail.`);
   } else {
     setStatus("Saving character", `Updating the character profile for ${name}.`);
     const response = await fetch("/api/characters", {

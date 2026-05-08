@@ -3,237 +3,298 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Character PNG Generator</title>
+    <title>Whoka Story Studio</title>
+    <meta name="theme-color" content="#f2b36a" />
+    <link rel="icon" href="./assets/whoka-favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/whoka-favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./assets/whoka-favicon-16.png" />
+    <link rel="apple-touch-icon" href="./assets/whoka-apple-touch-icon.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="backdrop backdrop-a"></div>
-    <div class="backdrop backdrop-b"></div>
-
     <main class="app-shell">
-      <header class="hero panel">
-        <div class="hero-copy">
-          <p class="eyebrow">First character setup</p>
-          <h1>Generate the first main character as a transparent PNG.</h1>
-          <p class="hero-text">
-            Upload the cover, describe the lead character, and we will send the
-            cover as a visual reference so the first PNG can anchor the art
-            style for later characters.
-          </p>
+      <header class="topbar">
+        <div class="brand-lockup">
+          <img class="brand-logo" src="./assets/whoka-sunrise-logo.png" alt="Whoka constellation tree logo" />
+          <div>
+            <p class="eyebrow">Whoka Digital Media</p>
+            <h1>Whoka Story Studio</h1>
+          </div>
         </div>
-        <div class="hero-stats" id="heroStats"></div>
+        <div class="topbar-actions">
+          <label class="book-switcher">
+            <span>Open book</span>
+            <select id="bookSelect"></select>
+          </label>
+          <button class="primary-button" id="newBookButton" type="button">Start new book</button>
+          <button class="ghost-button" id="addPageButton" type="button">Add page</button>
+        </div>
       </header>
 
-      <section class="grid">
-        <section class="panel cover-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Reference</p>
-              <h2>Upload the book cover</h2>
-            </div>
-            <button class="ghost-button" id="clearCoverButton" type="button">Clear</button>
+      <div class="global-status" id="globalStatus">
+        <strong id="globalStatusLabel">Ready</strong>
+        <span id="globalStatusText">Choose a page and generate its illustration.</span>
+      </div>
+
+      <section class="start-book panel" id="startBookPanel" hidden>
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Start book</p>
+            <h2>Set up the story</h2>
           </div>
+          <button class="ghost-button" id="cancelStartBookButton" type="button">Cancel</button>
+        </div>
 
-          <label class="dropzone" id="dropzone">
-            <input id="coverInput" type="file" accept="image/*" hidden />
-            <span class="dropzone-title">Drop the cover here or browse</span>
-            <span class="dropzone-subtitle">
-              The cover is resized locally and sent to OpenAI as a visual
-              reference for the first character PNG.
-            </span>
-          </label>
+        <div class="start-steps">
+          <section class="start-step">
+            <span class="step-number">1</span>
+            <div class="form-grid">
+              <label class="field">
+                <span>Book title</span>
+                <input id="startBookTitle" type="text" placeholder="My New Book" />
+              </label>
 
-          <div class="cover-preview" id="coverPreview">
-            <div class="cover-placeholder">
-              <span>No cover loaded yet</span>
+              <label class="field">
+                <span>Author</span>
+                <div class="inline-control">
+                  <select id="startAuthorSelect"></select>
+                  <input id="startAuthorName" type="text" placeholder="Or type a new author" />
+                </div>
+              </label>
+
+              <label class="field span-2">
+                <span>Target audience</span>
+                <select id="startAudienceSelect">
+                  <option value="3-5">Children age 3-5</option>
+                  <option value="3-8" selected>Children age 3-8</option>
+                  <option value="6-8">Children age 6-8</option>
+                  <option value="9-12">Children age 9-12</option>
+                </select>
+              </label>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="panel prompt-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Character brief</p>
-              <h2>Describe the first main character</h2>
+          <section class="start-step">
+            <span class="step-number">2</span>
+            <label class="field">
+              <span>Paste the full story</span>
+              <textarea
+                id="startStoryManuscript"
+                rows="10"
+                placeholder="Paste the whole story here. The tool will divide it into picture-book pages."
+              ></textarea>
+            </label>
+          </section>
+
+          <section class="start-step">
+            <span class="step-number">3</span>
+            <div class="start-actions">
+              <label class="field compact-field">
+                <span>Page count</span>
+                <input id="startPageCount" type="number" min="1" max="64" placeholder="Auto" />
+              </label>
+              <button class="primary-button" id="createStartedBookButton" type="button">Create book pages</button>
             </div>
-          </div>
+          </section>
+        </div>
+      </section>
 
-          <form id="characterForm" class="form-grid">
-            <label class="field span-2">
-              <span>Project title</span>
+      <section class="workspace">
+        <aside class="sidebar panel">
+          <section class="stack">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Book</p>
+                <h2>Details</h2>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>Title</span>
               <input id="projectTitle" type="text" placeholder="Book title" />
             </label>
 
             <label class="field">
-              <span>Character name</span>
-              <input id="characterName" type="text" placeholder="Character name" />
+              <span>Author</span>
+              <select id="authorSelect"></select>
             </label>
 
             <label class="field">
-              <span>Role / type</span>
-              <input id="characterRole" type="text" placeholder="Protagonist, sibling, sheep..." />
+              <span>Add author</span>
+              <div class="inline-control">
+                <input id="newAuthorName" type="text" placeholder="Author name" />
+                <button class="ghost-button" id="addAuthorButton" type="button">Add</button>
+              </div>
             </label>
 
-            <label class="field span-2">
-              <span>Visual traits</span>
-              <textarea
-                id="visualTraits"
-                rows="3"
-                placeholder="Shape, species, age, silhouette, color palette, wardrobe, and signature details..."
-              ></textarea>
+            <label class="field">
+              <span>Book cover</span>
+              <input id="coverInput" type="file" accept="image/*" />
             </label>
 
-            <label class="field span-2">
-              <span>Birth state</span>
-              <textarea
-                id="birthState"
-                rows="3"
-                placeholder="How the character should look and move in their canonical young form..."
-              ></textarea>
+            <label class="field">
+              <span>Print size</span>
+              <div class="print-size-toolbar" id="printSizeToolbar"></div>
+              <select id="printSizeSelect">
+                <option value="landscape-10x8">Landscape picture book 12 x 8 in</option>
+                <option value="portrait-8x10">Portrait picture book 8 x 12 in</option>
+                <option value="square-10x10">Square picture book 10 x 10 in</option>
+              </select>
             </label>
 
-            <label class="field span-2">
-              <span>Distinctive anatomy</span>
-              <textarea
-                id="distinctiveAnatomy"
-                rows="2"
-                placeholder="Unusual physical details that must stay consistent..."
-              ></textarea>
-            </label>
-
-            <label class="field span-2">
-              <span>Expression and pose</span>
-              <textarea
-                id="expressionPose"
-                rows="3"
-                placeholder="What the character should be doing or feeling in the first canonical image..."
-              ></textarea>
-            </label>
-
-            <label class="field span-2">
-              <span>Style lock notes</span>
-              <textarea
-                id="styleNotes"
-                rows="3"
-                placeholder="Anything that must stay consistent across every future image..."
-              ></textarea>
-            </label>
-
-            <label class="field span-2">
-              <span>Cover story notes</span>
-              <textarea
-                id="coverStoryNotes"
-                rows="3"
-                placeholder="Who is on the cover, what they are doing, and how they relate to each other..."
-              ></textarea>
-            </label>
-
-            <label class="field span-2">
-              <span>Generation seed</span>
-              <input
-                id="promptSeed"
-                type="text"
-                placeholder="Optional extra phrase to push the image direction"
-              />
-            </label>
-
-            <div class="button-row span-2">
-              <button class="primary-button" id="generateButton" type="submit">
-                Generate PNG
-              </button>
-              <button class="ghost-button" id="loadExampleButton" type="button">
-                Load Harvey preset
-              </button>
+            <div class="cover-preview" id="coverPreview">
+              <div class="empty-state">No cover loaded</div>
             </div>
-          </form>
-        </section>
-      </section>
 
-      <section class="panel result-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Result</p>
-            <h2>Generated first character</h2>
-          </div>
-          <div class="button-row">
-            <a class="ghost-button" id="downloadButton" href="#" download="first-character.png" hidden>
-              Download PNG
-            </a>
-            <button class="ghost-button" id="copyPromptButton" type="button" disabled>
-              Copy prompt
-            </button>
-          </div>
-        </div>
+            <button class="ghost-button full-width" id="clearCoverButton" type="button">Clear cover</button>
+          </section>
 
-        <div class="result-layout">
-          <div class="result-preview" id="resultPreview">
-            <div class="cover-placeholder">
-              <span>Generate a PNG to see the first main character here.</span>
+          <section class="stack page-list-section">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Pages</p>
+                <h2>Manuscript</h2>
+              </div>
             </div>
-          </div>
+            <div class="page-list" id="pageList"></div>
+          </section>
+        </aside>
 
-          <div class="result-meta">
-            <div class="status-card">
-              <strong id="statusLabel">Ready</strong>
-              <span id="statusText">Upload a cover and describe the character, then generate the first PNG.</span>
+        <section class="editor panel">
+          <section class="editor-card story-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Story</p>
+                <h2>Paste a full story</h2>
+              </div>
+              <button class="primary-button" id="buildPagesButton" type="button">Create page drafts</button>
             </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>Target audience</span>
+                <select id="audienceSelect">
+                  <option value="3-5">Children age 3-5</option>
+                  <option value="3-8">Children age 3-8</option>
+                  <option value="6-8">Children age 6-8</option>
+                  <option value="9-12">Children age 9-12</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Page count</span>
+                <input id="suggestedPageCount" type="number" min="1" max="64" placeholder="Auto" />
+              </label>
+
+              <label class="field span-2">
+                <span>Full story manuscript</span>
+                <textarea
+                  id="storyManuscript"
+                  rows="8"
+                  placeholder="Paste the whole story here, then create page drafts..."
+                ></textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="editor-card page-card" id="pageEditorCard">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Editing</p>
+                <h2 id="activePageLabel">Page 1</h2>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" id="duplicatePageButton" type="button">Duplicate</button>
+                <button class="ghost-button danger-button" id="deletePageButton" type="button">Delete</button>
+              </div>
+            </div>
+
+            <form id="pageForm" class="form-grid">
+              <label class="field span-2">
+                <span>Illustration direction</span>
+                <textarea
+                  id="sceneDescription"
+                  rows="5"
+                  placeholder="Describe what should happen in the illustration..."
+                ></textarea>
+              </label>
+
+              <label class="field">
+                <span>Characters</span>
+                <input id="pageCharacters" type="text" placeholder="Layla, Ginger" list="characterNames" />
+                <datalist id="characterNames"></datalist>
+              </label>
+
+              <label class="field">
+                <span>Setting</span>
+                <input id="pageSetting" type="text" placeholder="Backyard, barn, pasture..." />
+              </label>
+
+              <label class="field">
+                <span>Mood</span>
+                <input id="pageMood" type="text" placeholder="Tender, playful, brave..." />
+              </label>
+
+              <label class="field">
+                <span>Lighting</span>
+                <input id="pageLighting" type="text" placeholder="Warm afternoon light" />
+              </label>
+
+              <label class="field span-2">
+                <span>Text placement</span>
+                <input id="textSpace" type="text" placeholder="Leave quiet open space at top left for the story text." />
+              </label>
+
+              <label class="field span-2">
+                <span>Composition</span>
+                <input id="composition" type="text" placeholder="Landscape picture-book page, full bodies visible..." />
+              </label>
+
+              <label class="field span-2" hidden>
+                <span>Layout</span>
+                <select id="pageLayout">
+                  <option value="stacked-image-top">Image top, text bottom</option>
+                  <option value="stacked-text-top">Text top, image bottom</option>
+                  <option value="spread-text-left">Text left, image right</option>
+                  <option value="spread-image-left">Image left, text right</option>
+                  <option value="overlay-centered">Background image, centered text</option>
+                  <option value="overlay-top">Background image, top text</option>
+                  <option value="overlay-bottom">Background image, bottom text</option>
+                </select>
+              </label>
+
+            </form>            
 
             <label class="field">
               <span>Prompt used</span>
-              <textarea id="promptOutput" rows="12" readonly></textarea>
+              <textarea id="promptOutput" rows="10" readonly></textarea>
             </label>
 
-            <label class="field">
-              <span>Notes</span>
-              <textarea id="notesOutput" rows="6" readonly></textarea>
-            </label>
-          </div>
-        </div>
-      </section>
+            <button class="ghost-button full-width" id="copyPromptButton" type="button" disabled>Copy prompt</button>
+          </section>
 
-      <section class="panel flipbook-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Flipbook</p>
-            <h2>Quick slideshow for animation</h2>
-            <p class="hero-text">
-              Flip through the saved PNGs quickly to show how motion changes frame by frame.
-            </p>
-          </div>
-          <div class="button-row">
-            <button class="ghost-button" id="refreshFlipbookButton" type="button">Refresh frames</button>
-            <button class="ghost-button" id="prevFrameButton" type="button">Prev</button>
-            <button class="primary-button" id="playFlipbookButton" type="button">Play</button>
-            <button class="ghost-button" id="nextFrameButton" type="button">Next</button>
-          </div>
-        </div>
-
-        <div class="flipbook-layout">
-          <div class="flipbook-stage" id="flipbookStage">
-            <div class="cover-placeholder">
-              <span>Load or generate PNGs to build the flipbook.</span>
+          <section class="editor-card character-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Cast</p>
+                <h2>Available characters</h2>
+              </div>
             </div>
-          </div>
+            <div class="character-list" id="characterList"></div>
+          </section>
+        </section>
 
-          <div class="flipbook-meta">
-            <div class="status-card">
-              <strong id="flipbookTitle">No frames loaded</strong>
-              <span id="flipbookStatus">The slideshow will use PNGs from the outputs folder.</span>
+        <aside class="preview panel">
+          <section class="stack">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Book</p>
+                <h2>Full preview</h2>
+              </div>
             </div>
-
-            <label class="field">
-              <span>Flip speed</span>
-              <input id="flipbookSpeed" type="range" min="60" max="500" step="20" value="160" />
-            </label>
-
-            <div class="status-card">
-              <strong>How it teaches animation</strong>
-              <span>
-                The same characters move just a little between frames, so readers can see how timing changes the feeling of motion.
-              </span>
-            </div>
-          </div>
-        </div>
+            <article class="book-page-preview full-book-preview" id="fullBookPreview"></article>
+          </section>
+        </aside>
       </section>
     </main>
 

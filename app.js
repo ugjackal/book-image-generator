@@ -1,229 +1,1479 @@
-const STORAGE_KEY = "character-png-generator.state.v1";
+﻿const STORAGE_KEY = "author-book-builder.state.v2";
 const DEFAULT_COVER_PATH = "./artifacts/cover/book_cover.jfif";
+const DEFAULT_PAGE_LAYOUT = "stacked-image-top";
+const DEFAULT_PAGE_FONT = "storybook-serif";
+const DEFAULT_PRINT_SIZE = "landscape-10x8";
+const DEFAULT_PAGE_TEXT_SCALE = 1;
+const DEFAULT_PAGE_TEXT_VERTICAL = "top";
+const DEFAULT_IMAGE_OFFSET = 0;
+const IMAGE_OFFSET_MIN = -100;
+const IMAGE_OFFSET_MAX = 100;
+const IMAGE_NUDGE_STEP = 20;
+const IMAGE_MIN_PAN_SCALE = 1.12;
+const PRINT_SIZES = {
+  "landscape-10x8": { label: "Landscape picture book 12 x 8 in", width: 3000, height: 2000, aspect: 1.5 },
+  "portrait-8x10": { label: "Portrait picture book 8 x 12 in", width: 2000, height: 3000, aspect: 0.6666667 },
+  "square-10x10": { label: "Square picture book 10 x 10 in", width: 3000, height: 3000, aspect: 1 },
+};
+const PAGE_LAYOUT_OPTIONS = [
+  "stacked-image-top",
+  "stacked-text-top",
+  "spread-text-left",
+  "spread-image-left",
+  "overlay-centered",
+  "overlay-top",
+  "overlay-bottom",
+];
+const PAGE_FONT_OPTIONS = ["storybook-serif", "clean-sans", "playful-hand"];
+const PAGE_TEXT_VERTICAL_OPTIONS = ["top", "center", "bottom"];
+const TEXT_SCALE_MIN = 0.7;
+const TEXT_SCALE_MAX = 1.5;
+const TEXT_SCALE_STEP = 0.05;
 
 const $ = (selector, root = document) => root.querySelector(selector);
+const makeId = () => {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const random = Math.random().toString(36).slice(2);
+  return `id-${Date.now().toString(36)}-${random}`;
+};
 
 const refs = {
-  heroStats: $("#heroStats"),
+  bookSelect: $("#bookSelect"),
+  newBookButton: $("#newBookButton"),
+  startBookPanel: $("#startBookPanel"),
+  cancelStartBookButton: $("#cancelStartBookButton"),
+  startBookTitle: $("#startBookTitle"),
+  startAuthorSelect: $("#startAuthorSelect"),
+  startAuthorName: $("#startAuthorName"),
+  startAudienceSelect: $("#startAudienceSelect"),
+  startStoryManuscript: $("#startStoryManuscript"),
+  startPageCount: $("#startPageCount"),
+  createStartedBookButton: $("#createStartedBookButton"),
+  globalStatus: $("#globalStatus"),
+  globalStatusLabel: $("#globalStatusLabel"),
+  globalStatusText: $("#globalStatusText"),
+  addPageButton: $("#addPageButton"),
+  duplicatePageButton: $("#duplicatePageButton"),
+  deletePageButton: $("#deletePageButton"),
+  projectTitle: $("#projectTitle"),
+  authorSelect: $("#authorSelect"),
+  newAuthorName: $("#newAuthorName"),
+  addAuthorButton: $("#addAuthorButton"),
+  printSizeSelect: $("#printSizeSelect"),
+  printSizeToolbar: $("#printSizeToolbar"),
+  audienceSelect: $("#audienceSelect"),
+  suggestedPageCount: $("#suggestedPageCount"),
+  storyManuscript: $("#storyManuscript"),
+  buildPagesButton: $("#buildPagesButton"),
   coverInput: $("#coverInput"),
-  dropzone: $("#dropzone"),
   clearCoverButton: $("#clearCoverButton"),
   coverPreview: $("#coverPreview"),
-  characterForm: $("#characterForm"),
-  projectTitle: $("#projectTitle"),
-  characterName: $("#characterName"),
-  characterRole: $("#characterRole"),
-  visualTraits: $("#visualTraits"),
-  birthState: $("#birthState"),
-  distinctiveAnatomy: $("#distinctiveAnatomy"),
-  expressionPose: $("#expressionPose"),
-  styleNotes: $("#styleNotes"),
-  coverStoryNotes: $("#coverStoryNotes"),
-  promptSeed: $("#promptSeed"),
-  generateButton: $("#generateButton"),
-  loadExampleButton: $("#loadExampleButton"),
-  resultPreview: $("#resultPreview"),
-  downloadButton: $("#downloadButton"),
-  copyPromptButton: $("#copyPromptButton"),
-  refreshFlipbookButton: $("#refreshFlipbookButton"),
-  prevFrameButton: $("#prevFrameButton"),
-  playFlipbookButton: $("#playFlipbookButton"),
-  nextFrameButton: $("#nextFrameButton"),
-  flipbookStage: $("#flipbookStage"),
-  flipbookTitle: $("#flipbookTitle"),
-  flipbookStatus: $("#flipbookStatus"),
-  flipbookSpeed: $("#flipbookSpeed"),
+  pageList: $("#pageList"),
+  pageForm: $("#pageForm"),
+  activePageLabel: $("#activePageLabel"),
+  sceneDescription: $("#sceneDescription"),
+  pageCharacters: $("#pageCharacters"),
+  pageSetting: $("#pageSetting"),
+  pageMood: $("#pageMood"),
+  pageLighting: $("#pageLighting"),
+  textSpace: $("#textSpace"),
+  composition: $("#composition"),
+  pageLayout: $("#pageLayout"),
+  pageTextScale: $("#pageTextScale"),
+  pageTextScaleValue: $("#pageTextScaleValue"),
+  pageTextVerticalToolbar: $("#pageTextVerticalToolbar"),
+  decreasePageTextScale: $("#decreasePageTextScale"),
+  increasePageTextScale: $("#increasePageTextScale"),
+  characterNames: $("#characterNames"),
+  characterList: $("#characterList"),
+  fullBookPreview: $("#fullBookPreview"),
+  pageEditorCard: $("#pageEditorCard"),
   statusLabel: $("#statusLabel"),
   statusText: $("#statusText"),
   promptOutput: $("#promptOutput"),
-  notesOutput: $("#notesOutput"),
+  copyPromptButton: $("#copyPromptButton"),
 };
 
-const defaultState = () => ({
-  projectTitle: "Tiny Paws, Big Hooves",
-  characterName: "Harvey",
-  characterRole: "Cat protagonist",
-  visualTraits:
-    "A small tabby kitten with warm brown stripes, a soft fluffy coat, bright eyes, and an easy-to-read storybook silhouette.",
-  birthState:
-    "Harvey's canonical birth state is a young kitten with wobbly beginnings, back legs bent a little sideways, and front paws that bend inward so he bears weight on his front wrists. He waddles forward with a gorilla-like gait. Harvey has six toes on each paw.",
-  distinctiveAnatomy: "Harvey has six toes on each paw, with inward-bending front paws and a wrist-led walk.",
-  expressionPose:
-    "Walking forward on a road with a calm, curious expression, as if heading into the next chapter.",
-  styleNotes:
-    "Style lock: soft hand-painted children's-book illustration, warm sunset palette, painterly brush texture, gentle storybook realism, simplified readable shapes, and no photorealism. Keep Harvey and Marlin visually consistent across all scenes.",
-  coverStoryNotes:
-    "The cover shows Harvey the cat and Marlin the horse walking together away from a sunset on a road.",
-  promptSeed:
-    "Locked book style: warm, softly painted, storybook illustration with gentle realism, readable silhouettes, and consistent character design.",
-  coverFileName: "",
-  coverPreviewUrl: "",
-  coverReferenceUrl: "",
-  generatedImageUrl: "",
-  outputFiles: [],
-  flipbookIndex: 0,
-  flipbookPlaying: false,
-  flipbookDelay: 160,
-  flipbookTimer: null,
-  lastPrompt: "",
-  lastNotes: "",
-  status: "Ready",
-  statusDetail: "Upload a cover and describe the character, then generate the first PNG.",
+const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
+  id: makeId(),
+  number,
+  text: "",
+  sceneDescription: "",
+  characters: "",
+  setting: "",
+  mood: "",
+  lighting: "Warm natural children's-book daylight.",
+  textSpace: "Leave quiet open space where the page text can sit clearly.",
+  composition: "Landscape picture-book page composition with readable character silhouettes.",
+  layout: normalizeLayout(layout),
+  fontPreset: DEFAULT_PAGE_FONT,
+  fontScale: DEFAULT_PAGE_TEXT_SCALE,
+  textVerticalAlign: DEFAULT_PAGE_TEXT_VERTICAL,
+  printSize: DEFAULT_PRINT_SIZE,
+  imageScale: 1,
+  imageOffsetX: DEFAULT_IMAGE_OFFSET,
+  imageOffsetY: DEFAULT_IMAGE_OFFSET,
+  imageSource: "",
+  imageDataUrl: "",
+  imageUrl: "",
+  fileName: "",
+  prompt: "",
+  notes: "",
 });
 
-let state = loadState();
+const defaultBook = (title = "Untitled Book") => {
+  const firstPage = defaultPage(1);
+  return {
+    id: makeId(),
+    projectTitle: title,
+    authorName: "",
+    coverFileName: "",
+    coverPreviewUrl: "",
+    coverReferenceUrl: "",
+    audience: "3-8",
+    suggestedPageCount: "",
+    manuscript: "",
+    printSize: DEFAULT_PRINT_SIZE,
+    pages: [firstPage],
+    activePageId: firstPage.id,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+};
 
-function loadState() {
+const exampleBook = () => {
+  const book = defaultBook("Tiny Paws, Big Hooves");
+  book.pages = [
+    {
+      ...defaultPage(1),
+      text: "Layla and Ginger both spotted the same bone at the very same time.",
+      sceneDescription: "Layla and Ginger playfully tug at opposite ends of a bone in the dirt yard.",
+      characters: "Layla, Ginger",
+      setting: "A rustic yard with packed dirt and dry grass around the edges.",
+      mood: "Playful, mischievous, energetic, and safe for young readers.",
+      textSpace: "Leave a quiet open area at the top left for the story text.",
+    },
+  ];
+  book.activePageId = book.pages[0].id;
+  return book;
+};
+
+const defaultState = () => {
+  const book = exampleBook();
+  return {
+    books: [book],
+    activeBookId: book.id,
+    authors: ["Kim Stewart", "Tony Stewart"],
+    characters: [],
+    status: "Ready",
+    statusDetail: "Add page text, describe the scene, and generate the illustration.",
+    isGenerating: false,
+    generatingPageId: "",
+  };
+};
+
+const legacyBookFromState = (parsed) => ({
+  id: makeId(),
+  projectTitle: parsed.projectTitle || "Untitled Book",
+  authorName: parsed.authorName || "",
+  coverFileName: parsed.coverFileName || "",
+  coverPreviewUrl: parsed.coverPreviewUrl || "",
+  coverReferenceUrl: parsed.coverReferenceUrl || "",
+  audience: parsed.audience || "3-8",
+  suggestedPageCount: parsed.suggestedPageCount || "",
+  manuscript: parsed.manuscript || "",
+  printSize: normalizePrintSize(parsed.printSize),
+  pages: normalizePages(parsed.pages),
+  activePageId: parsed.activePageId || "",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+let state = defaultState();
+let stateSaveTimer = null;
+
+function normalizeLoadedState(parsed) {
+  const fallback = defaultState();
+  if (!Array.isArray(parsed.books)) {
+    const book = legacyBookFromState(parsed);
+    if (!book.activePageId || !book.pages.some((page) => page.id === book.activePageId)) {
+      book.activePageId = book.pages[0]?.id || "";
+    }
+    return {
+      books: [book],
+      activeBookId: book.id,
+      authors: normalizeAuthors(parsed.authors, book.authorName),
+      characters: [],
+      status: "Ready",
+      statusDetail: fallback.statusDetail,
+      isGenerating: false,
+      generatingPageId: "",
+    };
+  }
+  const books = parsed.books.length ? parsed.books.map(normalizeBook) : fallback.books;
+  return {
+    ...fallback,
+    ...parsed,
+    books,
+    activeBookId: books.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : books[0].id,
+    authors: normalizeAuthors(parsed.authors, books.map((book) => book.authorName)),
+    characters: [],
+    status: "Ready",
+    statusDetail: fallback.statusDetail,
+    isGenerating: false,
+    generatingPageId: "",
+  };
+}
+
+function loadStateFromLocalStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return {
-      ...defaultState(),
-      ...parsed,
-      coverFileName: "",
-      coverPreviewUrl: "",
-      coverReferenceUrl: "",
-      generatedImageUrl: "",
-      outputFiles: [],
-      flipbookIndex: 0,
-      flipbookPlaying: false,
-      flipbookDelay: 160,
-      flipbookTimer: null,
-      lastPrompt: "",
-      lastNotes: "",
-      status: "Ready",
-      statusDetail: defaultState().statusDetail,
-    };
+    return normalizeLoadedState(parsed);
   } catch {
     return defaultState();
   }
 }
 
-function saveState() {
-  const {
-    coverFileName,
-    coverPreviewUrl,
-    coverReferenceUrl,
-    generatedImageUrl,
-    outputFiles,
-    flipbookIndex,
-    flipbookPlaying,
-    flipbookDelay,
-    flipbookTimer,
-    lastPrompt,
-    lastNotes,
-    status,
-    statusDetail,
-    ...serializable
-  } = state;
+async function loadStateFromServer() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+    const response = await fetch("/api/state", { headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    const parsed = await response.json();
+    if (!parsed || typeof parsed !== "object") return null;
+    return normalizeLoadedState(parsed);
   } catch {
-    // Ignore storage failures in file:// or private mode contexts.
+    return null;
   }
+}
+
+function serializeState() {
+  const { characters, status, statusDetail, isGenerating, generatingPageId, previewMode, ...serializable } = state;
+  return serializable;
+}
+
+function queueServerStateSave(immediate = false) {
+  if (stateSaveTimer) {
+    clearTimeout(stateSaveTimer);
+    stateSaveTimer = null;
+  }
+  const pushState = async () => {
+    try {
+      await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(serializeState()),
+      });
+    } catch {
+      // Server sync is best-effort; local cache still keeps the current browser usable.
+    }
+  };
+  if (immediate) {
+    void pushState();
+    return;
+  }
+  stateSaveTimer = setTimeout(() => {
+    void pushState();
+  }, 200);
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
+  } catch {
+    // Local storage can fail in private browsing or file contexts.
+  }
+  queueServerStateSave();
+}
+
+function ensureBookPresence() {
+  if (!Array.isArray(state.books) || !state.books.length) {
+    const book = exampleBook();
+    state.books = [book];
+    state.activeBookId = book.id;
+    return;
+  }
+  state.books = state.books.map((book) => {
+    const normalized = normalizeBook(book);
+    if (!normalized.pages.length) {
+      normalized.pages = [defaultPage(1)];
+      normalized.activePageId = normalized.pages[0].id;
+    }
+    return normalized;
+  });
+  if (!state.books.some((book) => book.id === state.activeBookId)) {
+    state.activeBookId = state.books[0].id;
+  }
+}
+
+function normalizeBook(book) {
+  const normalized = {
+    ...defaultBook(book.projectTitle || "Untitled Book"),
+    ...book,
+    printSize: normalizePrintSize(book.printSize),
+    pages: normalizePages(book.pages),
+  };
+  if (!normalized.activePageId || !normalized.pages.some((page) => page.id === normalized.activePageId)) {
+    normalized.activePageId = normalized.pages[0]?.id || "";
+  }
+  normalized.pages = normalized.pages.map((page) => ({
+    ...page,
+    imageSource: page.imageSource || (page.imageUrl ? "generated" : ""),
+    imageScale: normalizeImageScale(page.imageScale),
+    imageOffsetX: normalizeImageOffset(page.imageOffsetX),
+    imageOffsetY: normalizeImageOffset(page.imageOffsetY),
+    fontPreset: normalizeFontPreset(page.fontPreset),
+    fontScale: normalizeTextScale(page.fontScale),
+    textVerticalAlign: normalizeTextVerticalAlign(page.textVerticalAlign),
+    imageDataUrl: page.imageDataUrl || "",
+    imageUrl: page.imageDataUrl || page.imageUrl || "",
+  }));
+  return normalized;
+}
+
+function normalizePages(pages) {
+  const fallback = [defaultPage(1)];
+  const source = Array.isArray(pages) && pages.length ? pages : fallback;
+  return source.map((page, index) => ({
+    ...defaultPage(index + 1),
+    ...page,
+    number: index + 1,
+    layout: normalizeLayout(page?.layout),
+    fontPreset: normalizeFontPreset(page?.fontPreset),
+    fontScale: normalizeTextScale(page?.fontScale),
+    textVerticalAlign: normalizeTextVerticalAlign(page?.textVerticalAlign),
+    imageOffsetX: normalizeImageOffset(page?.imageOffsetX),
+    imageOffsetY: normalizeImageOffset(page?.imageOffsetY),
+  }));
+}
+
+function normalizePrintSize(printSize) {
+  const value = String(printSize || "").trim();
+  return Object.prototype.hasOwnProperty.call(PRINT_SIZES, value) ? value : DEFAULT_PRINT_SIZE;
+}
+
+function normalizeImageScale(scale) {
+  const value = Number(scale);
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(2, Math.max(0.75, value));
+}
+
+function normalizeImageOffset(offset) {
+  const value = Number(offset);
+  if (!Number.isFinite(value)) return DEFAULT_IMAGE_OFFSET;
+  return Math.min(IMAGE_OFFSET_MAX, Math.max(IMAGE_OFFSET_MIN, value));
+}
+
+function imageOffsetLabel(offset) {
+  const value = Math.round(normalizeImageOffset(offset));
+  return `${value > 0 ? "+" : ""}${value}%`;
+}
+
+function printSizeLabel(printSize) {
+  return PRINT_SIZES[normalizePrintSize(printSize)].label;
+}
+
+function printSizeAspect(printSize) {
+  return PRINT_SIZES[normalizePrintSize(printSize)].aspect;
+}
+
+function printSizeDimensions(printSize) {
+  const option = PRINT_SIZES[normalizePrintSize(printSize)];
+  return { width: option.width, height: option.height };
+}
+
+function normalizeLayout(layout) {
+  const value = String(layout || "").trim();
+  return PAGE_LAYOUT_OPTIONS.includes(value) ? value : DEFAULT_PAGE_LAYOUT;
+}
+
+function normalizeFontPreset(fontPreset) {
+  const value = String(fontPreset || "").trim();
+  return PAGE_FONT_OPTIONS.includes(value) ? value : DEFAULT_PAGE_FONT;
+}
+
+function normalizeTextVerticalAlign(value) {
+  const normalized = String(value || "").trim();
+  return PAGE_TEXT_VERTICAL_OPTIONS.includes(normalized) ? normalized : DEFAULT_PAGE_TEXT_VERTICAL;
+}
+
+function textVerticalJustify(value) {
+  switch (normalizeTextVerticalAlign(value)) {
+    case "center":
+      return "center";
+    case "bottom":
+      return "flex-end";
+    case "top":
+    default:
+      return "flex-start";
+  }
+}
+
+function normalizeTextScale(scale) {
+  const value = Number(scale);
+  if (!Number.isFinite(value)) return DEFAULT_PAGE_TEXT_SCALE;
+  return Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, value));
+}
+
+function clampTextScale(scale) {
+  return Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, Number(scale) || DEFAULT_PAGE_TEXT_SCALE));
+}
+
+function defaultLayoutForAudience(audience) {
+  if (audience === "9-12") return "spread-text-left";
+  return "stacked-image-top";
+}
+
+function fontStack(fontPreset) {
+  switch (normalizeFontPreset(fontPreset)) {
+    case "clean-sans":
+      return 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+    case "playful-hand":
+      return '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive';
+    case "storybook-serif":
+    default:
+      return 'ui-serif, Georgia, "Times New Roman", serif';
+  }
+}
+
+function recommendedTextScale(book, page) {
+  let scale = 1;
+  switch (book?.audience) {
+    case "3-5":
+      scale *= 1.18;
+      break;
+    case "3-8":
+      scale *= 1.08;
+      break;
+    case "6-8":
+      scale *= 1;
+      break;
+    case "9-12":
+      scale *= 0.92;
+      break;
+    default:
+      scale *= 1;
+      break;
+  }
+
+  switch (normalizePrintSize(book?.printSize)) {
+    case "portrait-8x10":
+      scale *= 1.03;
+      break;
+    case "square-10x10":
+      scale *= 1;
+      break;
+    case "landscape-10x8":
+    default:
+      scale *= 0.96;
+      break;
+  }
+
+  switch (layoutMode(page?.layout)) {
+    case "spread":
+      scale *= 0.94;
+      break;
+    case "overlay":
+      scale *= 0.9;
+      break;
+    default:
+      scale *= 1;
+      break;
+  }
+
+  const textLength = String(page?.text || "").trim().length;
+  if (textLength > 450) scale *= 0.88;
+  else if (textLength > 250) scale *= 0.94;
+  else if (textLength < 60) scale *= 1.05;
+
+  return Math.min(1.4, Math.max(0.72, scale));
+}
+
+function effectiveTextScale(book, page) {
+  const scale = recommendedTextScale(book, page) * normalizeTextScale(page?.fontScale);
+  return Math.min(1.65, Math.max(0.65, scale));
+}
+
+function fontScaleLabel(scale) {
+  return `${Math.round(normalizeTextScale(scale) * 100)}%`;
+}
+
+function fontLabel(fontPreset) {
+  switch (normalizeFontPreset(fontPreset)) {
+    case "clean-sans":
+      return "Clean sans";
+    case "playful-hand":
+      return "Playful hand";
+    case "storybook-serif":
+    default:
+      return "Storybook serif";
+  }
+}
+
+function layoutLabel(layout) {
+  switch (normalizeLayout(layout)) {
+    case "stacked-text-top":
+      return "Text top, image bottom";
+    case "spread-text-left":
+      return "Text left, image right";
+    case "spread-image-left":
+      return "Image left, text right";
+    case "overlay-centered":
+      return "Background image, centered text";
+    case "overlay-top":
+      return "Background image, top text";
+    case "overlay-bottom":
+      return "Background image, bottom text";
+    case "stacked-image-top":
+    default:
+      return "Image top, text bottom";
+  }
+}
+
+function layoutMode(layout) {
+  const value = normalizeLayout(layout);
+  if (value.startsWith("spread-")) return "spread";
+  if (value.startsWith("overlay-")) return "overlay";
+  return "stacked";
+}
+
+function layoutOverlayPosition(layout) {
+  const value = normalizeLayout(layout);
+  if (value === "overlay-top") return "top";
+  if (value === "overlay-bottom") return "bottom";
+  return "center";
+}
+
+function layoutIcon(layout) {
+  switch (normalizeLayout(layout)) {
+    case "stacked-text-top":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-text" x="4" y="4" width="16" height="6" rx="1.5"></rect>
+          <rect class="layout-icon-image" x="4" y="13" width="16" height="7" rx="1.5"></rect>
+        </svg>
+      `;
+    case "spread-text-left":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-text" x="3" y="4" width="7" height="16" rx="1.5"></rect>
+          <rect class="layout-icon-image" x="13" y="4" width="8" height="16" rx="1.5"></rect>
+        </svg>
+      `;
+    case "spread-image-left":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="4" width="8" height="16" rx="1.5"></rect>
+          <rect class="layout-icon-text" x="13" y="4" width="8" height="16" rx="1.5"></rect>
+        </svg>
+      `;
+    case "overlay-centered":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="8" y="8" width="8" height="8" rx="1.5"></rect>
+        </svg>
+      `;
+    case "overlay-top":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="6" y="5" width="12" height="4" rx="1.25"></rect>
+        </svg>
+      `;
+    case "overlay-bottom":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="6" y="15" width="12" height="4" rx="1.25"></rect>
+        </svg>
+      `;
+    case "stacked-image-top":
+    default:
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="4" y="4" width="16" height="7" rx="1.5"></rect>
+          <rect class="layout-icon-text" x="4" y="14" width="16" height="6" rx="1.5"></rect>
+        </svg>
+      `;
+  }
+}
+
+function printSizeIcon(printSize) {
+  const size = normalizePrintSize(printSize);
+  switch (size) {
+    case "portrait-8x10":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="print-icon-frame" x="7" y="3" width="10" height="18" rx="2"></rect>
+          <rect class="print-icon-hint" x="10" y="5" width="4" height="14" rx="1"></rect>
+        </svg>
+      `;
+    case "square-10x10":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="print-icon-frame" x="4" y="4" width="16" height="16" rx="2"></rect>
+          <rect class="print-icon-hint" x="8" y="8" width="8" height="8" rx="1.5"></rect>
+        </svg>
+      `;
+    case "landscape-10x8":
+    default:
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="print-icon-frame" x="3" y="7" width="18" height="10" rx="2"></rect>
+          <rect class="print-icon-hint" x="5" y="9" width="14" height="6" rx="1.2"></rect>
+        </svg>
+      `;
+  }
+}
+
+function renderLayoutToolbar(activeLayout, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  const options = [
+    "stacked-image-top",
+    "stacked-text-top",
+    "spread-text-left",
+    "spread-image-left",
+    "overlay-centered",
+    "overlay-top",
+    "overlay-bottom",
+  ];
+  return `
+    <div class="layout-toolbar" role="toolbar" aria-label="Page layout"${pageAttr}>
+      ${options
+        .map((layout) => {
+          const selected = normalizeLayout(activeLayout) === layout ? " is-active" : "";
+          return `
+            <button
+              class="layout-button${selected}"
+              type="button"
+              data-layout-choice="${layout}"
+              ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+              aria-pressed="${normalizeLayout(activeLayout) === layout ? "true" : "false"}"
+              title="${escapeHtml(layoutLabel(layout))}"
+            >
+              ${layoutIcon(layout)}
+            </button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPrintSizeToolbar(activePrintSize) {
+  const options = ["landscape-10x8", "portrait-8x10", "square-10x10"];
+  return `
+    <div class="print-size-toolbar" role="toolbar" aria-label="Print size">
+      ${options
+        .map((size) => {
+          const selected = normalizePrintSize(activePrintSize) === size ? " is-active" : "";
+          return `
+            <button
+              class="print-size-button${selected}"
+              type="button"
+              data-print-size-choice="${size}"
+              aria-pressed="${normalizePrintSize(activePrintSize) === size ? "true" : "false"}"
+              title="${escapeHtml(printSizeLabel(size))}"
+            >
+              ${printSizeIcon(size)}
+            </button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPreviewLayoutToolbar(activeLayout, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="page-preview-layout-toolbar" role="toolbar" aria-label="Page layout"${pageAttr}>
+      ${PAGE_LAYOUT_OPTIONS.map((layout) => {
+        const selected = normalizeLayout(activeLayout) === layout ? " is-active" : "";
+        return `
+          <button
+            class="layout-button${selected}"
+            type="button"
+            data-layout-choice="${layout}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeLayout(activeLayout) === layout ? "true" : "false"}"
+            title="${escapeHtml(layoutLabel(layout))}"
+            aria-label="${escapeHtml(layoutLabel(layout))}"
+          >
+            ${layoutIcon(layout)}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPreviewFontToolbar(activeFontPreset, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="page-preview-font-toolbar" role="toolbar" aria-label="Font style"${pageAttr}>
+      ${PAGE_FONT_OPTIONS.map((fontPreset) => {
+        const selected = normalizeFontPreset(activeFontPreset) === fontPreset ? " is-active" : "";
+        return `
+          <button
+            class="font-button${selected}"
+            type="button"
+            data-font-choice="${fontPreset}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeFontPreset(activeFontPreset) === fontPreset ? "true" : "false"}"
+            title="${escapeHtml(fontLabel(fontPreset))}"
+            aria-label="${escapeHtml(fontLabel(fontPreset))}"
+          >
+            <span class="font-button-sample font-sample-${fontPreset}">Aa</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPreviewTextVerticalToolbarCompact(activeValue, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="page-preview-text-vertical-toolbar page-preview-text-vertical-compact" role="toolbar" aria-label="Text position"${pageAttr}>
+      ${PAGE_TEXT_VERTICAL_OPTIONS.map((choice) => {
+        const selected = normalizeTextVerticalAlign(activeValue) === choice ? " is-active" : "";
+        const label = choice === "top" ? "Top" : choice === "center" ? "Middle" : "Bottom";
+        return `
+          <button
+            class="text-vertical-button${selected}"
+            type="button"
+            data-text-vertical-choice="${choice}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeTextVerticalAlign(activeValue) === choice ? "true" : "false"}"
+            title="${escapeHtml(`${label} align`)}"
+            aria-label="${escapeHtml(`${label} align`)}"
+          >
+            ${textVerticalIcon(choice)}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPreviewTextScaleToolbarCompact(activeScale, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="page-preview-text-scale-toolbar page-preview-text-scale-compact" role="toolbar" aria-label="Text size controls"${pageAttr}>
+      <button class="ghost-button icon-button" type="button" data-text-scale-step="-${TEXT_SCALE_STEP}" ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""} aria-label="Decrease text size" title="Decrease text size">
+        <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+      </button>
+      <button class="ghost-button icon-button" type="button" data-text-scale-step="${TEXT_SCALE_STEP}" ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""} aria-label="Increase text size" title="Increase text size">
+        <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h14M12 5v14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+      </button>
+    </div>
+  `;
+}
+
+function renderFontToolbar(activeFontPreset, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="font-toolbar" role="toolbar" aria-label="Font style"${pageAttr}>
+      ${PAGE_FONT_OPTIONS.map((fontPreset) => {
+        const selected = normalizeFontPreset(activeFontPreset) === fontPreset ? " is-active" : "";
+        return `
+          <button
+            class="font-button${selected}"
+            type="button"
+            data-font-choice="${fontPreset}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeFontPreset(activeFontPreset) === fontPreset ? "true" : "false"}"
+            title="${escapeHtml(fontLabel(fontPreset))}"
+            aria-label="${escapeHtml(fontLabel(fontPreset))}"
+          >
+            <span class="font-button-sample font-sample-${fontPreset}">Aa</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderTextVerticalToolbar(activeValue, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="text-vertical-toolbar" role="toolbar" aria-label="Text position"${pageAttr}>
+      <span class="toolbar-label">Text position</span>
+      ${PAGE_TEXT_VERTICAL_OPTIONS.map((choice) => {
+        const selected = normalizeTextVerticalAlign(activeValue) === choice ? " is-active" : "";
+        const label =
+          choice === "top" ? "Top" : choice === "center" ? "Middle" : "Bottom";
+        return `
+          <button
+            class="text-vertical-button${selected}"
+            type="button"
+            data-text-vertical-choice="${choice}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeTextVerticalAlign(activeValue) === choice ? "true" : "false"}"
+            title="${escapeHtml(`${label} align`)}"
+            aria-label="${escapeHtml(`${label} align`)}"
+          >
+            ${textVerticalIcon(choice)}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function textVerticalIcon(choice) {
+  switch (choice) {
+    case "center":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-vertical-frame" x="5" y="4" width="14" height="16" rx="2"></rect>
+          <rect class="text-vertical-block" x="7" y="10" width="10" height="4" rx="1.2"></rect>
+        </svg>
+      `;
+    case "bottom":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-vertical-frame" x="5" y="4" width="14" height="16" rx="2"></rect>
+          <rect class="text-vertical-block" x="7" y="14" width="10" height="4" rx="1.2"></rect>
+        </svg>
+      `;
+    case "top":
+    default:
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-vertical-frame" x="5" y="4" width="14" height="16" rx="2"></rect>
+          <rect class="text-vertical-block" x="7" y="6" width="10" height="4" rx="1.2"></rect>
+        </svg>
+      `;
+  }
+}
+
+function renderTextScaleToolbar(activeScale, pageId = "") {
+  const scaleInputId = pageId ? `pageTextScale-${pageId}` : "pageTextScale";
+  const scaleValueId = pageId ? `pageTextScaleValue-${pageId}` : "pageTextScaleValue";
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="text-scale-toolbar" aria-label="Text size controls"${pageAttr}>
+      <span class="toolbar-label">Text size</span>
+      <button class="ghost-button icon-button" type="button" data-text-scale-step="-${TEXT_SCALE_STEP}" ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""} aria-label="Decrease text size" title="Decrease text size">
+        <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+      </button>
+      <input
+        id="${scaleInputId}"
+        type="range"
+        min="${TEXT_SCALE_MIN}"
+        max="${TEXT_SCALE_MAX}"
+        step="0.01"
+        value="${normalizeTextScale(activeScale)}"
+        aria-label="Text size"
+      />
+      <button class="ghost-button icon-button" type="button" data-text-scale-step="${TEXT_SCALE_STEP}" ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""} aria-label="Increase text size" title="Increase text size">
+        <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h14M12 5v14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+      </button>
+      <output id="${scaleValueId}">${fontScaleLabel(activeScale)}</output>
+    </div>
+  `;
+}
+
+function normalizeAuthors(authors, extra = []) {
+  const extras = Array.isArray(extra) ? extra : [extra];
+  return [...(Array.isArray(authors) ? authors : []), ...extras]
+    .map((name) => String(name || "").trim())
+    .filter(Boolean)
+    .filter((name, index, list) => list.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index);
+}
+
+function activeBook() {
+  return state.books.find((book) => book.id === state.activeBookId) || state.books[0];
+}
+
+function activePage() {
+  const book = activeBook();
+  return book.pages.find((page) => page.id === book.activePageId) || book.pages[0];
 }
 
 function setStatus(label, detail) {
   state.status = label;
   state.statusDetail = detail;
-  refs.statusLabel.textContent = label;
-  refs.statusText.textContent = detail;
-  renderHeroStats();
+  if (refs.statusLabel) refs.statusLabel.textContent = label;
+  if (refs.statusText) refs.statusText.textContent = detail;
+  if (refs.globalStatusLabel) refs.globalStatusLabel.textContent = label;
+  if (refs.globalStatusText) refs.globalStatusText.textContent = detail;
+  if (refs.globalStatus) refs.globalStatus.classList.toggle("is-busy", Boolean(state.isGenerating));
 }
 
-function renderState() {
-  refs.projectTitle.value = state.projectTitle;
-  refs.characterName.value = state.characterName;
-  refs.characterRole.value = state.characterRole;
-  refs.visualTraits.value = state.visualTraits;
-  refs.birthState.value = state.birthState;
-  refs.distinctiveAnatomy.value = state.distinctiveAnatomy;
-  refs.expressionPose.value = state.expressionPose;
-  refs.styleNotes.value = state.styleNotes;
-  refs.coverStoryNotes.value = state.coverStoryNotes;
-  refs.promptSeed.value = state.promptSeed;
-
-  refs.coverPreview.innerHTML = state.coverPreviewUrl
-    ? `<img src="${state.coverPreviewUrl}" alt="Uploaded cover reference" />`
-    : `<div class="cover-placeholder"><span>No cover loaded yet</span></div>`;
-
-  refs.resultPreview.innerHTML = state.generatedImageUrl
-    ? `<img src="${state.generatedImageUrl}" alt="Generated first character" />`
-    : `<div class="cover-placeholder"><span>Generate a PNG to see the first main character here.</span></div>`;
-
-  refs.promptOutput.value = state.lastPrompt || "";
-  refs.notesOutput.value = state.lastNotes || "";
-
-  refs.downloadButton.hidden = !state.generatedImageUrl;
-  refs.downloadButton.href = state.generatedImageUrl || "#";
-  refs.copyPromptButton.disabled = !state.lastPrompt;
-
-  renderHeroStats();
-  renderFlipbook();
+function setGenerating(isGenerating, pageId = "") {
+  state.isGenerating = isGenerating;
+  state.generatingPageId = isGenerating ? pageId : "";
+  if (refs.globalStatus) refs.globalStatus.classList.toggle("is-busy", isGenerating);
+  renderBookPreview();
 }
 
-function renderHeroStats() {
-  refs.heroStats.innerHTML = [
-    statCard(`Cover: ${state.coverFileName ? "Loaded" : "Waiting"}`, "The book cover is the visual style reference."),
-    statCard(state.characterName || "Unnamed character", "This will be the first canonical character PNG."),
-    statCard(state.status, state.statusDetail),
-  ].join("");
-}
-
-function renderFlipbook() {
-  const files = state.outputFiles || [];
-  refs.flipbookSpeed.value = String(state.flipbookDelay);
-
-  if (!files.length) {
-    refs.flipbookStage.innerHTML = `<div class="cover-placeholder"><span>No frames found yet.</span></div>`;
-    refs.flipbookTitle.textContent = "No frames loaded";
-    refs.flipbookStatus.textContent = "Refresh the outputs folder or generate new PNGs to build the slideshow.";
-    refs.playFlipbookButton.textContent = "Play";
-    refs.playFlipbookButton.disabled = true;
-    refs.prevFrameButton.disabled = true;
-    refs.nextFrameButton.disabled = true;
-    refs.refreshFlipbookButton.disabled = false;
-    return;
+function revokeBlobUrl(url) {
+  if (typeof url === "string" && url.startsWith("blob:")) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // Ignore revocation failures.
+    }
   }
-
-  const index = ((state.flipbookIndex % files.length) + files.length) % files.length;
-  const current = files[index];
-  refs.flipbookStage.innerHTML = `
-    <img src="${current.url}" alt="${escapeHtml(current.name)}" />
-    <div class="flipbook-counter">${index + 1} / ${files.length}</div>
-  `;
-  refs.flipbookTitle.textContent = current.name;
-  refs.flipbookStatus.textContent = state.flipbookPlaying
-    ? "Autoplay is running. Use Prev/Next to step through frames."
-    : "Use Play to cycle frames quickly like a flipbook.";
-  refs.playFlipbookButton.textContent = state.flipbookPlaying ? "Pause" : "Play";
-  refs.playFlipbookButton.disabled = false;
-  refs.prevFrameButton.disabled = false;
-  refs.nextFrameButton.disabled = false;
-  refs.refreshFlipbookButton.disabled = false;
 }
 
-function statCard(title, detail) {
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to load the uploaded image."));
+    };
+    image.src = url;
+  });
+}
+
+async function fitImageFileToPrintDataUrl(file, printSize) {
+  const image = await loadImageFromFile(file);
+  const { width, height } = printSizeDimensions(printSize);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Unable to prepare the uploaded image for print.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const drawWidth = Math.round(image.naturalWidth * scale);
+  const drawHeight = Math.round(image.naturalHeight * scale);
+  const x = Math.round((width - drawWidth) / 2);
+  const y = Math.round((height - drawHeight) / 2);
+  ctx.drawImage(image, x, y, drawWidth, drawHeight);
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.96),
+    sourceWidth: image.naturalWidth,
+    sourceHeight: image.naturalHeight,
+  };
+}
+
+function render() {
+  ensureBookPresence();
+  const book = activeBook();
+  const page = activePage();
+  refs.projectTitle.value = book.projectTitle;
+  refs.authorSelect.value = book.authorName || "";
+  refs.newAuthorName.value = "";
+  refs.printSizeSelect.value = normalizePrintSize(book.printSize);
+  refs.printSizeToolbar.innerHTML = renderPrintSizeToolbar(book.printSize);
+  refs.audienceSelect.value = book.audience || "3-8";
+  refs.suggestedPageCount.value = book.suggestedPageCount || "";
+  refs.storyManuscript.value = book.manuscript || "";
+  refs.sceneDescription.value = page.sceneDescription;
+  refs.pageCharacters.value = page.characters;
+  refs.pageSetting.value = page.setting;
+  refs.pageMood.value = page.mood;
+  refs.pageLighting.value = page.lighting;
+  refs.textSpace.value = page.textSpace;
+  refs.composition.value = page.composition;
+  refs.pageLayout.value = normalizeLayout(page.layout);
+  if (refs.activePageLabel) refs.activePageLabel.textContent = `Page ${page.number}`;
+  refs.promptOutput.value = page.prompt || "";
+  refs.copyPromptButton.disabled = !page.prompt;
+  refs.deletePageButton.disabled = book.pages.length <= 1;
+
+  refs.coverPreview.innerHTML = book.coverPreviewUrl
+    ? `<img src="${book.coverPreviewUrl}" alt="Style reference cover" />`
+    : `<div class="empty-state">No cover loaded</div>`;
+
+  renderBookSelect();
+  renderAuthorSelect();
+  renderPageList();
+  renderCharacters();
+  renderFullBookPreview();
+  renderStatsOnly();
+}
+
+function renderStatsOnly() {
+  if (refs.statusLabel) refs.statusLabel.textContent = state.status;
+  if (refs.statusText) refs.statusText.textContent = state.statusDetail;
+  if (refs.globalStatusLabel) refs.globalStatusLabel.textContent = state.status;
+  if (refs.globalStatusText) refs.globalStatusText.textContent = state.statusDetail;
+  if (refs.globalStatus) refs.globalStatus.classList.toggle("is-busy", Boolean(state.isGenerating));
+}
+
+function renderBookSelect() {
+  refs.bookSelect.innerHTML = state.books
+    .map((book) => {
+      const selected = book.id === state.activeBookId ? " selected" : "";
+      const title = book.projectTitle.trim() || "Untitled Book";
+      return `<option value="${book.id}"${selected}>${escapeHtml(title)}</option>`;
+    })
+    .join("");
+}
+
+function renderAuthorSelect() {
+  const book = activeBook();
+  const options = [
+    `<option value="">No author selected</option>`,
+    ...state.authors.map((author) => {
+      const selected = author === book.authorName ? " selected" : "";
+      return `<option value="${escapeHtml(author)}"${selected}>${escapeHtml(author)}</option>`;
+    }),
+  ];
+  refs.authorSelect.innerHTML = options.join("");
+  refs.authorSelect.value = book.authorName || "";
+  refs.startAuthorSelect.innerHTML = options.join("");
+}
+
+function renderPageList() {
+  const book = activeBook();
+  refs.pageList.innerHTML = book.pages
+    .map((page) => {
+      const selected = page.id === book.activePageId ? " is-active" : "";
+      const title = page.text.trim() || page.sceneDescription.trim() || "Untitled page";
+      const imageStatus = page.imageUrl ? (page.imageSource === "uploaded" ? "Uploaded" : "Illustrated") : "Draft";
+      const layout = layoutLabel(page.layout);
+      return `
+        <button class="page-list-item${selected}" type="button" data-page-id="${page.id}">
+          <span class="page-number">${page.number}</span>
+          <span class="page-list-copy">
+            <strong>${escapeHtml(title)}</strong>
+            <small>${imageStatus} - ${escapeHtml(layout)}</small>
+          </span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderCharacters() {
+  refs.characterNames.innerHTML = state.characters
+    .map((character) => `<option value="${escapeHtml(character.name)}"></option>`)
+    .join("");
+
+  refs.characterList.innerHTML = state.characters.length
+    ? state.characters
+        .map(
+          (character) => `
+            <button class="character-chip" type="button" data-character-name="${escapeHtml(character.name)}">
+              <strong>${escapeHtml(character.name)}</strong>
+              <span>${escapeHtml(character.role || "Character")}</span>
+            </button>
+          `
+        )
+        .join("")
+    : `<div class="empty-state compact">No character profiles found yet.</div>`;
+}
+
+function renderFullBookPreview() {
+  const book = activeBook();
+  refs.fullBookPreview.className = "book-page-preview full-book-preview";
+  refs.fullBookPreview.style.setProperty("--page-aspect", String(printSizeAspect(book.printSize)));
+  refs.fullBookPreview.innerHTML = renderFullBookPreviewMarkup(book);
+}
+
+function renderBookPreview() {
+  renderFullBookPreview();
+}
+
+function renderFullBookPreviewMarkup(book) {
+  const activeGeneratingPageId = state.isGenerating ? state.generatingPageId || activeBook().activePageId : "";
   return `
-    <div class="stat-card">
-      <strong>${escapeHtml(title)}</strong>
-      <span>${escapeHtml(detail)}</span>
+    <div class="full-book-preview-head">
+      <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
+      <span>${book.pages.length} pages</span>
+    </div>
+    <div class="full-book-preview-list">
+      ${book.pages
+        .map((page) => {
+          const layout = normalizeLayout(page.layout);
+          const text = page.text.trim();
+          const pageStyle = `--page-text-font:${fontStack(page.fontPreset)};--page-text-scale:${effectiveTextScale(book, page)};--page-image-scale:${normalizeImageScale(page.imageScale)};--page-image-offset-x:${normalizeImageOffset(page.imageOffsetX)};--page-image-offset-y:${normalizeImageOffset(page.imageOffsetY)};--page-text-justify:${textVerticalJustify(page.textVerticalAlign)};`;
+          const isGeneratingPage = activeGeneratingPageId === page.id;
+          const imageScale = normalizeImageScale(page.imageScale);
+          const imageOffsetX = normalizeImageOffset(page.imageOffsetX);
+          const imageOffsetY = normalizeImageOffset(page.imageOffsetY);
+          const imageStyle = `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:${(imageScale * 100).toFixed(2)}%;height:${(imageScale * 100).toFixed(2)}%;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+          const textFontStyle = `font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};`;
+          const textScaleStyle = `font-size:${effectiveTextScale(book, page).toFixed(3)}rem;`;
+          const textJustifyStyle = `justify-content:${textVerticalJustify(page.textVerticalAlign)};`;
+          const overlayTextStyle = `font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};font-size:${(effectiveTextScale(book, page) * 0.95).toFixed(3)}rem;`;
+          const textEditorAttrs = `contenteditable="true" spellcheck="true" role="textbox" aria-label="Edit page text" data-inline-page-text-editor="true" data-page-id="${escapeHtml(page.id)}" data-placeholder="Click to edit page text"`;
+          const imageMarkup = `
+            <div class="page-art${isGeneratingPage ? " is-generating" : ""}">
+              ${
+                isGeneratingPage
+                  ? `
+                    <div class="loading-indicator" aria-hidden="true"></div>
+                    <div class="page-art-empty-state"><span class="page-art-empty-state-label">Generating page ${page.number} illustration...</span></div>
+                  `
+                  : page.imageUrl
+                  ? `<div class="page-art-frame"><img src="${escapeHtml(page.imageUrl)}" alt="Preview for page ${page.number}" style="${imageStyle}" /></div>`
+                  : `<div class="page-art-empty-state"><span class="page-art-empty-state-label">No image yet</span></div>`
+              }
+            </div>`;
+          const textMarkup = `<div class="mini-text-preview inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${textFontStyle}${textScaleStyle}${textJustifyStyle}">${text ? escapeHtml(text) : ""}</div>`;
+          const previewToolbar = `
+            <div class="page-preview-toolbar" data-page-id="${escapeHtml(page.id)}">
+              <div class="page-preview-layout-row">
+                ${renderPreviewLayoutToolbar(layout, page.id)}
+              </div>
+              <div class="page-preview-font-row">
+                ${renderPreviewFontToolbar(page.fontPreset, page.id)}
+                ${renderPreviewTextVerticalToolbarCompact(page.textVerticalAlign, page.id)}
+                ${renderPreviewTextScaleToolbarCompact(page.fontScale, page.id)}
+              </div>
+              <div class="page-preview-image-actions">
+                <button
+                  class="ghost-button icon-button"
+                  type="button"
+                  data-generate-page-id="${escapeHtml(page.id)}"
+                  aria-label="Generate illustration"
+                  title="Generate illustration"
+                  ${isGeneratingPage ? "disabled" : ""}
+                >
+                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3l1.8 4.6L18 9.5l-4.2 1.4L12 15l-1.8-4.1L6 9.5l4.2-1.9L12 3zM5 16l1 2.2L8 19l-2 .8L5 22l-1-2.2L2 19l2-.8L5 16zm14-2l1.3 3 3 .7-3 .8-1.2 3-1.2-3-3-.8 3-.7 1.1-3z" fill="currentColor"/>
+                  </svg>
+                </button>
+                <a
+                  class="ghost-button icon-button${page.imageUrl ? "" : " is-disabled"}"
+                  href="${page.imageUrl || "#"}"
+                  download="${escapeHtml(page.fileName || `page-${page.number}-scene.png`)}"
+                  ${page.imageUrl ? "" : 'aria-disabled="true" tabindex="-1"'}
+                  aria-label="Download page image"
+                  title="Download page image"
+                >
+                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3v11M8 10l4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+                  </svg>
+                </a>
+                <label class="ghost-button icon-button file-button" aria-label="Upload image to this page" title="Upload image to this page">
+                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 21V11m0 0l4 4m-4-4-4 4M5 5h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+                  </svg>
+                  <input type="file" accept="image/*" data-page-upload-input="true" data-page-id="${escapeHtml(page.id)}" />
+                </label>
+                <button
+                  class="ghost-button icon-button"
+                  type="button"
+                  data-clear-page-image-id="${escapeHtml(page.id)}"
+                  aria-label="Clear page image"
+                  title="Clear page image"
+                >
+                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7h16M9 7V5h6v2m-7 0 1 12h6l1-12M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          `;
+          const body =
+            layoutMode(layout) === "spread"
+              ? `<div class="mini-spread">
+                  <div class="mini-spread-side">${layout === "spread-text-left" ? textMarkup : imageMarkup}</div>
+                  <div class="mini-spread-spine"></div>
+                  <div class="mini-spread-side">${layout === "spread-text-left" ? imageMarkup : textMarkup}</div>
+                </div>`
+              : layoutMode(layout) === "overlay"
+              ? `<div class="mini-overlay overlay-${layoutOverlayPosition(layout)}">
+                  ${imageMarkup}
+                  <div class="mini-overlay-text inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${overlayTextStyle}">${text ? escapeHtml(text) : ""}</div>
+                </div>`
+              : layout === "stacked-text-top"
+              ? `<div class="mini-stack">${textMarkup}${imageMarkup}</div>`
+              : `<div class="mini-stack">${imageMarkup}${textMarkup}</div>`;
+          const imageControls =
+            page.imageUrl
+              ? `
+              <div class="page-image-controls" data-page-id="${escapeHtml(page.id)}">
+                  <div class="page-image-controls-row page-image-adjust-row">
+                    <div class="page-image-nudge-group">
+                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up">&#8593;</button>
+                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left">&#8592;</button>
+                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image">&#10226;</button>
+                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right">&#8594;</button>
+                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down">&#8595;</button>
+                    </div>
+                    <div class="page-image-scale-group">
+                      <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller">&#8722;</button>
+                      <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger">+</button>
+                    </div>
+                  </div>
+                </div>
+              `
+              : "";
+          return `
+            <article class="full-book-page" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
+              <header class="full-book-page-head">
+                <strong>Page ${page.number}</strong>
+                <button class="ghost-button small-button" type="button" data-edit-page-id="${page.id}">Edit</button>
+              </header>
+              ${previewToolbar}
+              ${body}
+              ${imageControls}
+            </article>
+          `;
+        })
+        .join("")}
     </div>
   `;
 }
 
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (char) => {
-    const map = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-    return map[char] ?? char;
+function updateActivePage(values) {
+  updatePageById(activePage().id, values);
+}
+
+function updatePageById(pageId, values) {
+  const book = activeBook();
+  const page = book.pages.find((item) => item.id === pageId);
+  if (!page) return;
+  Object.assign(page, values);
+  book.activePageId = pageId;
+  touchActiveBook();
+  saveState();
+  renderPageList();
+  renderBookPreview();
+}
+
+function resolvePreviewPageId(target) {
+  return target.closest("[data-page-id]")?.dataset.pageId || activePage().id;
+}
+
+async function setPageImageFromFile(file, pageId = activePage().id) {
+  const book = activeBook();
+  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  setStatus("Preparing page image", "Resizing the uploaded image for this page.");
+  const imageDataUrl = await resizeFileToDataUrl(file, 2400, 0.92);
+  const previewUrl = imageDataUrl;
+  revokeBlobUrl(page.imageUrl);
+  Object.assign(page, {
+    imageUrl: previewUrl,
+    imageDataUrl,
+    fileName: file.name,
+    imageSource: "uploaded",
+    imageScale: 1,
+    imageOffsetX: DEFAULT_IMAGE_OFFSET,
+    imageOffsetY: DEFAULT_IMAGE_OFFSET,
+    prompt: "",
+    notes: `Uploaded image: ${file.name}`,
   });
+  touchActiveBook();
+  saveState();
+  setStatus("Image attached", `The uploaded image is now saved to page ${page.number}.`);
+  render();
+}
+
+function clearPageImage(pageId = activePage().id) {
+  const book = activeBook();
+  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  revokeBlobUrl(page.imageUrl);
+  Object.assign(page, {
+    imageUrl: "",
+    imageDataUrl: "",
+    fileName: "",
+    imageSource: "",
+    notes: "",
+  });
+  touchActiveBook();
+  saveState();
+  setStatus("Page image cleared", "This page is back to its draft state.");
+  render();
+}
+
+function addPage() {
+  const book = activeBook();
+  const page = defaultPage(book.pages.length + 1, defaultLayoutForAudience(book.audience));
+  book.pages.push(page);
+  book.activePageId = page.id;
+  syncManuscriptFromPages(book);
+  touchActiveBook();
+  saveState();
+  setStatus("Page added", `Page ${page.number} is ready for text and scene direction.`);
+  render();
+}
+
+function duplicatePage() {
+  const book = activeBook();
+  const source = activePage();
+  const page = {
+    ...defaultPage(book.pages.length + 1, source.layout),
+    text: source.text,
+    sceneDescription: source.sceneDescription,
+    characters: source.characters,
+    setting: source.setting,
+    mood: source.mood,
+    lighting: source.lighting,
+    textSpace: source.textSpace,
+    composition: source.composition,
+    layout: source.layout,
+    fontPreset: source.fontPreset,
+    fontScale: source.fontScale,
+    textVerticalAlign: source.textVerticalAlign,
+    imageScale: source.imageScale,
+    imageOffsetX: source.imageOffsetX,
+    imageOffsetY: source.imageOffsetY,
+  };
+  book.pages.push(page);
+  book.activePageId = page.id;
+  syncManuscriptFromPages(book);
+  touchActiveBook();
+  saveState();
+  setStatus("Page duplicated", `Page ${page.number} copied the current page direction.`);
+  render();
+}
+
+function deletePage() {
+  const book = activeBook();
+  if (book.pages.length <= 1) return;
+  const index = book.pages.findIndex((page) => page.id === book.activePageId);
+  book.pages.splice(index, 1);
+  book.pages.forEach((page, pageIndex) => {
+    page.number = pageIndex + 1;
+  });
+  book.activePageId = book.pages[Math.max(0, index - 1)].id;
+  syncManuscriptFromPages(book);
+  touchActiveBook();
+  saveState();
+  setStatus("Page deleted", "The manuscript page list has been renumbered.");
+  render();
+}
+
+async function generatePageForId(pageId) {
+  const book = activeBook();
+  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  if (!page.sceneDescription.trim() && !page.text.trim()) {
+    setStatus("Missing page", "Add page text or illustration direction before generating.");
+    return;
+  }
+
+  const approved = window.confirm("We will be charged 0.01 cent to generate this illustration. Continue?");
+  if (!approved) {
+    setStatus("Generation canceled", "No image was generated.");
+    return;
+  }
+
+  setGenerating(true, page.id);
+  setStatus("Generating", `Creating illustration for page ${page.number}.`);
+
+  const payload = {
+    project_title: book.projectTitle,
+    page_number: String(page.number),
+    page_text: page.text,
+    scene_description: page.sceneDescription || page.text,
+    setting: page.setting,
+    mood: page.mood,
+    lighting: page.lighting,
+    text_space: page.textSpace,
+    composition: page.composition,
+    layout: page.layout,
+    print_size: book.printSize,
+    characters: splitNames(page.characters),
+    cover_data_url: book.coverReferenceUrl || book.coverPreviewUrl || "",
+  };
+
+  try {
+    const response = await fetch("/api/generate-page-scene", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Page scene generation failed.");
+    }
+
+    Object.assign(page, {
+      imageUrl: result.file_url,
+      fileName: result.file_name,
+      imageSource: "generated",
+      imageScale: 1,
+      imageOffsetX: DEFAULT_IMAGE_OFFSET,
+      imageOffsetY: DEFAULT_IMAGE_OFFSET,
+      prompt: result.prompt,
+      notes: [
+        `Model: ${result.model}`,
+        `Output: ${result.file_name}`,
+        `Layout: ${layoutLabel(page.layout)}`,
+        result.response_id ? `Response id: ${result.response_id}` : null,
+        result.cover_used ? "Cover reference: included" : "Cover reference: not provided",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+    touchActiveBook();
+    saveState();
+    setStatus("Illustration ready", `Page ${page.number} has a generated image.`);
+    render();
+  } catch (error) {
+    setStatus("Error", error.message || "Something went wrong while generating the page.");
+  } finally {
+    setGenerating(false);
+  }
+}
+
+async function generateActivePage() {
+  return generatePageForId(activePage().id);
+}
+
+async function handleCoverFile(file) {
+  const book = activeBook();
+  setStatus("Preparing cover", "Resizing the cover locally for style reference.");
+  const previewUrl = await resizeFileToDataUrl(file, 900, 0.9);
+  const referenceUrl = await resizeFileToDataUrl(file, 1400, 0.9);
+  book.coverFileName = file.name;
+  book.coverPreviewUrl = previewUrl;
+  book.coverReferenceUrl = referenceUrl;
+  touchActiveBook();
+  saveState();
+  setStatus("Cover loaded", "The cover will guide new page illustrations.");
+  render();
+}
+
+async function loadDefaultCover() {
+  const book = activeBook();
+  if (book.coverPreviewUrl) return;
+  try {
+    const response = await fetch(DEFAULT_COVER_PATH);
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const coverFile = new File([blob], "book_cover.jfif", {
+      type: blob.type || "image/jpeg",
+    });
+    await handleCoverFile(coverFile);
+  } catch {
+    setStatus("No cover yet", "Upload a cover when you want a visual style reference.");
+  }
+}
+
+async function loadCharacters() {
+  try {
+    const response = await fetch("/api/characters");
+    if (!response.ok) throw new Error("Unable to load character profiles.");
+    const result = await response.json();
+    state.characters = Array.isArray(result.characters) ? result.characters : [];
+    renderCharacters();
+  } catch (error) {
+    state.characters = [];
+    setStatus("Characters unavailable", error.message || "Could not load character profiles.");
+    renderCharacters();
+  }
 }
 
 function resizeFileToDataUrl(file, maxSide = 1024, quality = 0.92) {
@@ -256,184 +1506,558 @@ function resizeFileToDataUrl(file, maxSide = 1024, quality = 0.92) {
   });
 }
 
-async function handleCoverFile(file) {
-  setStatus("Preparing cover", "Resizing the cover locally so it can be used as a style reference.");
-  const previewUrl = await resizeFileToDataUrl(file, 900, 0.9);
-  const referenceUrl = await resizeFileToDataUrl(file, 1400, 0.9);
-  state.coverFileName = file.name;
-  state.coverPreviewUrl = previewUrl;
-  state.coverReferenceUrl = referenceUrl;
-  state.generatedImageUrl = "";
-  state.lastPrompt = "";
-  state.lastNotes = "";
-  setStatus("Cover loaded", "The cover is ready to anchor the first character image.");
-  saveState();
-  renderState();
-  refs.coverInput.value = "";
+function splitNames(value) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
-async function loadDefaultCover() {
-  try {
-    const response = await fetch(DEFAULT_COVER_PATH);
-    if (!response.ok) return;
-    const blob = await response.blob();
-    const coverFile = new File([blob], "book_cover.jfif", {
-      type: blob.type || "image/jpeg",
-    });
-    await handleCoverFile(coverFile);
-  } catch {
-    setStatus(
-      "No cover yet",
-      "Upload the book cover from artifacts/cover if auto-load does not work."
-    );
+function appendCharacter(name) {
+  const page = activePage();
+  const names = splitNames(page.characters);
+  if (!names.some((item) => item.toLowerCase() === name.toLowerCase())) {
+    names.push(name);
   }
+  page.characters = names.join(", ");
+  touchActiveBook();
+  saveState();
+  render();
 }
 
-async function generateCharacter(event) {
-  event.preventDefault();
-  if (!state.characterName.trim()) {
-    setStatus("Missing name", "Add a character name before generating the PNG.");
+function touchActiveBook() {
+  touchBook(activeBook());
+}
+
+function touchBook(book) {
+  book.updatedAt = new Date().toISOString();
+}
+
+function openStartBookFlow() {
+  refs.startBookPanel.hidden = false;
+  refs.startBookTitle.value = "";
+  refs.startAuthorSelect.value = "";
+  refs.startAuthorName.value = "";
+  refs.startAudienceSelect.value = "3-8";
+  refs.startStoryManuscript.value = "";
+  refs.startPageCount.value = "";
+  refs.startBookTitle.focus();
+  setStatus("Start book", "Add the basics, paste the story, and create page drafts.");
+}
+
+function closeStartBookFlow() {
+  refs.startBookPanel.hidden = true;
+}
+
+function createStartedBook() {
+  const title = refs.startBookTitle.value.trim() || "Untitled Book";
+  const author = refs.startAuthorName.value.trim() || refs.startAuthorSelect.value.trim();
+  const manuscript = refs.startStoryManuscript.value.trim();
+  if (!manuscript) {
+    setStatus("Missing story", "Paste the story before creating the book pages.");
+    refs.startStoryManuscript.focus();
     return;
   }
 
-  refs.generateButton.disabled = true;
-  setStatus("Generating", "Sending the cover reference and character brief to OpenAI.");
+  const book = defaultBook(title);
+  book.authorName = author;
+  book.audience = refs.startAudienceSelect.value;
+  book.suggestedPageCount = refs.startPageCount.value;
+  book.manuscript = manuscript;
+  if (author) state.authors = normalizeAuthors(state.authors, author);
+  const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
+  book.pages = pagesFromTextBlocks(book, pageTexts);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
+  book.activePageId = book.pages[0]?.id || "";
+  touchBook(book);
+  state.books.push(book);
+  state.activeBookId = book.id;
+  saveState();
+  closeStartBookFlow();
+  setStatus("Book created", `"${book.projectTitle}" has ${book.pages.length} page drafts.`);
+  render();
+}
 
-  const payload = {
-    project_title: state.projectTitle,
-    character_name: state.characterName,
-    character_role: state.characterRole,
-    visual_traits: state.visualTraits,
-    birth_state: state.birthState,
-    distinctive_anatomy: state.distinctiveAnatomy,
-    expression_pose: state.expressionPose,
-    style_notes: state.styleNotes,
-    cover_story_notes: state.coverStoryNotes,
-    prompt_seed: state.promptSeed,
-    cover_data_url: state.coverReferenceUrl,
+function addAuthor() {
+  const author = refs.newAuthorName.value.trim();
+  if (!author) {
+    setStatus("Missing author", "Enter an author name before adding it.");
+    return;
+  }
+  state.authors = normalizeAuthors(state.authors, author);
+  activeBook().authorName = author;
+  touchActiveBook();
+  saveState();
+  setStatus("Author added", `${author} is selected for this book.`);
+  render();
+}
+
+function buildPagesFromStory() {
+  const book = activeBook();
+  const manuscript = book.manuscript.trim();
+  if (!manuscript) {
+    setStatus("Missing story", "Paste the story manuscript before creating page drafts.");
+    return;
+  }
+
+  const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
+  book.pages = pagesFromTextBlocks(book, pageTexts);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
+  book.activePageId = book.pages[0]?.id || "";
+  touchActiveBook();
+  saveState();
+  setStatus("Pages drafted", `${book.pages.length} page drafts were created from the pasted story.`);
+  render();
+}
+
+function pagesFromTextBlocks(book, pageTexts) {
+  return pageTexts.map((text, index) => {
+    const page = defaultPage(index + 1);
+    page.text = text;
+    page.characters = inferCharacters(text);
+    page.sceneDescription = buildSceneDirection(text, page.characters, book.audience);
+    page.setting = "Use the story context to choose the clearest setting for this moment.";
+    page.mood = inferMood(text);
+    page.lighting = audienceLighting(book.audience);
+    page.textSpace = audienceTextSpace(book.audience);
+    page.composition = audienceComposition(book.audience);
+    page.layout = defaultLayoutForAudience(book.audience);
+    return page;
+  });
+}
+
+function syncManuscriptFromPages(book) {
+  book.manuscript = formatManuscriptWithPageBreaks(book.pages.map((page) => page.text || ""));
+}
+
+function extractPageTextsFromManuscript(manuscript) {
+  const lines = String(manuscript || "").split(/\r?\n/);
+  const blocks = [];
+  let current = [];
+  let sawPageHeader = false;
+
+  for (const line of lines) {
+    if (/^\s*---\s*Page\s+\d+\s*---\s*$/i.test(line)) {
+      sawPageHeader = true;
+      if (current.length) {
+        blocks.push(current.join("\n").trim());
+        current = [];
+      }
+      continue;
+    }
+
+    if (/^\s*-{8,}\s*$/.test(line)) {
+      if (current.length) {
+        blocks.push(current.join("\n").trim());
+        current = [];
+      }
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  if (current.length) blocks.push(current.join("\n").trim());
+
+  const cleaned = blocks.map((block) => block.trim()).filter(Boolean);
+  return sawPageHeader ? cleaned : [];
+}
+
+function syncPagesFromManuscript(book) {
+  const pageTexts = extractPageTextsFromManuscript(book.manuscript);
+  if (!pageTexts.length) return false;
+
+  const nextPages = pageTexts.map((text, index) => {
+    const source = book.pages[index];
+    const page = source ? { ...source } : defaultPage(index + 1, defaultLayoutForAudience(book.audience));
+    page.id = source?.id || page.id;
+    page.number = index + 1;
+    page.text = text;
+    return page;
+  });
+
+  book.pages = nextPages;
+  if (!book.pages.some((page) => page.id === book.activePageId)) {
+    book.activePageId = book.pages[0]?.id || "";
+  }
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
+  return true;
+}
+
+function splitStoryIntoPages(text, audience, requestedCount) {
+  const clean = stripPageBreakMarkers(text).replace(/\s+/g, " ").trim();
+  const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) || [clean];
+  const targetWords = wordsPerPage(audience);
+  const totalWords = countWords(clean);
+  const autoCount = Math.max(1, Math.ceil(totalWords / targetWords));
+  const pageCount = Number.isFinite(requestedCount) && requestedCount > 0 ? requestedCount : autoCount;
+  const target = Math.max(6, Math.ceil(totalWords / pageCount));
+  const pages = [];
+  let current = [];
+  let currentWords = 0;
+
+  for (const sentence of sentences) {
+    const sentenceWords = countWords(sentence);
+    const shouldBreak = current.length && currentWords + sentenceWords > target && pages.length < pageCount - 1;
+    if (shouldBreak) {
+      pages.push(current.join(" "));
+      current = [];
+      currentWords = 0;
+    }
+    current.push(sentence);
+    currentWords += sentenceWords;
+  }
+
+  if (current.length) pages.push(current.join(" "));
+  return pages.filter(Boolean);
+}
+
+function stripPageBreakMarkers(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:[-=_]{3,}\s*Page\s+\d+\s*[-=_]{3,}|[-=_]{8,})\s*$/.test(line))
+    .join("\n");
+}
+
+function formatManuscriptWithPageBreaks(pageTexts) {
+  const sections = pageTexts.map((text, index) => {
+    const number = index + 1;
+    return [`--- Page ${number} ---`, text.trim()].join("\n");
+  });
+  return sections.join("\n\n--------------------------------\n\n");
+}
+
+function wordsPerPage(audience) {
+  const map = {
+    "3-5": 14,
+    "3-8": 24,
+    "6-8": 38,
+    "9-12": 70,
   };
+  return map[audience] || 28;
+}
 
-  try {
-    const response = await fetch("/api/generate-character", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+function countWords(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function inferCharacters(text) {
+  const lower = text.toLowerCase();
+  return state.characters
+    .filter((character) => lower.includes(character.name.toLowerCase()))
+    .map((character) => character.name)
+    .join(", ");
+}
+
+function buildSceneDirection(text, characters, audience) {
+  const focus = characters ? `Feature ${characters}. ` : "";
+  const visualScale =
+    audience === "3-5" || audience === "3-8"
+      ? "Make the illustration carry most of the storytelling with simple, expressive shapes. "
+      : "Use a richer scene with clear action and emotional detail. ";
+  return `${focus}${visualScale}Illustrate this story moment: ${text}`;
+}
+
+function inferMood(text) {
+  const lower = text.toLowerCase();
+  if (/(happy|laugh|smile|play|joy|excited|fun)/.test(lower)) return "Warm, playful, and joyful.";
+  if (/(sad|lonely|cry|afraid|scared|worried)/.test(lower)) return "Tender, gentle, and emotionally clear.";
+  if (/(run|race|jump|chase|dash|hurry)/.test(lower)) return "Energetic, lively, and safe for young readers.";
+  return "Warm, clear, and storybook gentle.";
+}
+
+function audienceLighting(audience) {
+  if (audience === "3-5" || audience === "3-8") return "Bright warm sunrise or daytime light with soft friendly contrast.";
+  return "Warm natural light with enough contrast to support a richer illustrated scene.";
+}
+
+function audienceTextSpace(audience) {
+  if (audience === "3-5") return "Reserve a large quiet text area with very high readability, preferably in the lower third or a calm sky area.";
+  if (audience === "3-8") return "Reserve a generous quiet text area for large readable type, with the illustration doing most of the storytelling.";
+  if (audience === "6-8") return "Reserve a clear text-safe area that can hold a short paragraph without covering the main action.";
+  return "Reserve a smaller text-safe area; the page may carry more words and a slightly denser illustration.";
+}
+
+function audienceComposition(audience) {
+  if (audience === "3-5") return "Simple picture-book composition, big characters, clear emotion, uncluttered background, strong image-first storytelling.";
+  if (audience === "3-8") return "Image-forward picture-book composition with large characters, readable action, and room for large text.";
+  if (audience === "6-8") return "Balanced picture-book composition with clear action, expressive characters, and moderate detail.";
+  return "Detailed illustrated page composition with richer setting, clear focal point, and room for a longer text block.";
+}
+
+function audiencePreviewClass(audience) {
+  if (audience === "3-5" || audience === "3-8") return "audience-young";
+  if (audience === "6-8") return "audience-middle";
+  return "audience-older";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => {
+    const map = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return map[char] ?? char;
+  });
+}
+
+function escapeCssUrl(value) {
+  return String(value ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function normalizeInlinePageText(value) {
+  return String(value ?? "")
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+
+refs.newBookButton.addEventListener("click", openStartBookFlow);
+refs.cancelStartBookButton.addEventListener("click", closeStartBookFlow);
+refs.createStartedBookButton.addEventListener("click", createStartedBook);
+refs.addPageButton.addEventListener("click", addPage);
+refs.duplicatePageButton.addEventListener("click", duplicatePage);
+refs.deletePageButton.addEventListener("click", deletePage);
+
+refs.projectTitle.addEventListener("input", (event) => {
+  activeBook().projectTitle = event.target.value;
+  touchActiveBook();
+  saveState();
+  renderBookSelect();
+});
+
+refs.authorSelect.addEventListener("change", (event) => {
+  activeBook().authorName = event.target.value;
+  touchActiveBook();
+  saveState();
+  renderAuthorSelect();
+});
+
+refs.addAuthorButton.addEventListener("click", addAuthor);
+refs.buildPagesButton.addEventListener("click", buildPagesFromStory);
+
+refs.audienceSelect.addEventListener("change", (event) => {
+  activeBook().audience = event.target.value;
+  touchActiveBook();
+  saveState();
+  renderBookPreview();
+});
+
+refs.printSizeSelect.addEventListener("change", (event) => {
+  activeBook().printSize = normalizePrintSize(event.target.value);
+  touchActiveBook();
+  saveState();
+  render();
+});
+
+refs.printSizeToolbar.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-print-size-choice]");
+  if (!button) return;
+  activeBook().printSize = normalizePrintSize(button.dataset.printSizeChoice);
+  touchActiveBook();
+  saveState();
+  render();
+});
+
+refs.suggestedPageCount.addEventListener("input", (event) => {
+  activeBook().suggestedPageCount = event.target.value;
+  touchActiveBook();
+  saveState();
+});
+
+refs.storyManuscript.addEventListener("input", (event) => {
+  const book = activeBook();
+  book.manuscript = event.target.value;
+  syncPagesFromManuscript(book);
+  touchActiveBook();
+  saveState();
+  renderPageList();
+  renderBookPreview();
+});
+
+refs.pageForm.addEventListener("input", (event) => {
+  const keyMap = {
+    sceneDescription: "sceneDescription",
+    pageCharacters: "characters",
+    pageSetting: "setting",
+    pageMood: "mood",
+    pageLighting: "lighting",
+    textSpace: "textSpace",
+    composition: "composition",
+    pageLayout: "layout",
+  };
+  const key = keyMap[event.target.id];
+  if (!key) return;
+  updateActivePage({ [key]: event.target.value });
+});
+
+refs.fullBookPreview.addEventListener("click", (event) => {
+  const pageId = resolvePreviewPageId(event.target);
+  const generateButton = event.target.closest("[data-generate-page-id]");
+  if (generateButton) {
+    generatePageForId(generateButton.dataset.generatePageId);
+    return;
+  }
+  const clearImageButton = event.target.closest("[data-clear-page-image-id]");
+  if (clearImageButton) {
+    clearPageImage(clearImageButton.dataset.clearPageImageId);
+    return;
+  }
+  const layoutButton = event.target.closest("[data-layout-choice]");
+  if (layoutButton) {
+    updatePageById(pageId, { layout: layoutButton.dataset.layoutChoice });
+    render();
+    return;
+  }
+  const fontButton = event.target.closest("[data-font-choice]");
+  if (fontButton) {
+    updatePageById(pageId, { fontPreset: fontButton.dataset.fontChoice });
+    render();
+    return;
+  }
+  const verticalButton = event.target.closest("[data-text-vertical-choice]");
+  if (verticalButton) {
+    updatePageById(pageId, { textVerticalAlign: verticalButton.dataset.textVerticalChoice });
+    render();
+    return;
+  }
+  const scaleStepButton = event.target.closest("[data-text-scale-step]");
+  if (scaleStepButton) {
+    const page = activeBook().pages.find((item) => item.id === pageId) || activePage();
+    const nextScale = clampTextScale(normalizeTextScale(page.fontScale) + Number(scaleStepButton.dataset.textScaleStep || 0));
+    updatePageById(pageId, { fontScale: nextScale });
+    render();
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-page-id]");
+  if (editButton) {
+    const nextPageId = editButton.dataset.editPageId;
+    activeBook().activePageId = nextPageId;
+    saveState();
+    render();
+    refs.pageEditorCard?.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+  const nudgeButton = event.target.closest("[data-image-nudge]");
+  if (nudgeButton) {
+    const page = activeBook().pages.find((item) => item.id === pageId);
+    if (!page) return;
+    const next = {
+      imageOffsetX: normalizeImageOffset(page.imageOffsetX),
+      imageOffsetY: normalizeImageOffset(page.imageOffsetY),
+    };
+    switch (nudgeButton.dataset.imageNudge) {
+      case "up":
+        next.imageOffsetY -= IMAGE_NUDGE_STEP;
+        break;
+      case "down":
+        next.imageOffsetY += IMAGE_NUDGE_STEP;
+        break;
+      case "left":
+        next.imageOffsetX -= IMAGE_NUDGE_STEP;
+        break;
+      case "right":
+        next.imageOffsetX += IMAGE_NUDGE_STEP;
+        break;
+      default:
+        break;
+    }
+    if (normalizeImageScale(page.imageScale) < IMAGE_MIN_PAN_SCALE) {
+      next.imageScale = IMAGE_MIN_PAN_SCALE;
+    }
+    updatePageById(pageId, next);
+    return;
+  }
+  if (event.target.closest("[data-image-reset-position]")) {
+    updatePageById(pageId, {
+      imageOffsetX: DEFAULT_IMAGE_OFFSET,
+      imageOffsetY: DEFAULT_IMAGE_OFFSET,
+      imageScale: 1,
     });
-
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || "Character generation failed.");
-    }
-
-    state.generatedImageUrl = result.file_url;
-    refs.downloadButton.download = result.file_name || "first-character.png";
-    state.lastPrompt = result.prompt;
-    state.lastNotes = [
-      `Model: ${result.model}`,
-      `Output: ${result.file_name}`,
-      result.response_id ? `Response id: ${result.response_id}` : null,
-      result.cover_used ? "Cover reference: included" : "Cover reference: not provided",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    setStatus("Done", "The first canonical character PNG is ready.");
-    saveState();
-    renderState();
-    await refreshFlipbookFrames({ focusLatest: true });
-  } catch (error) {
-    setStatus("Error", error.message || "Something went wrong while generating the PNG.");
-  } finally {
-    refs.generateButton.disabled = false;
+    return;
   }
-}
+  const imageScaleStepButton = event.target.closest("[data-image-scale-step]");
+  if (imageScaleStepButton) {
+    const page = activeBook().pages.find((item) => item.id === pageId);
+    if (!page) return;
+    const nextScale = normalizeImageScale(normalizeImageScale(page.imageScale) + Number(imageScaleStepButton.dataset.imageScaleStep || 0));
+    updatePageById(pageId, { imageScale: nextScale });
+  }
+});
 
-function loadExample() {
-  const preset = defaultState();
-  state.projectTitle = preset.projectTitle;
-  state.characterName = preset.characterName;
-  state.characterRole = preset.characterRole;
-  state.visualTraits = preset.visualTraits;
-  state.birthState = preset.birthState;
-  state.distinctiveAnatomy = preset.distinctiveAnatomy;
-  state.expressionPose = preset.expressionPose;
-  state.styleNotes = preset.styleNotes;
-  state.coverStoryNotes = preset.coverStoryNotes;
-  state.promptSeed = preset.promptSeed;
-  state.generatedImageUrl = "";
-  state.lastPrompt = "";
-  state.lastNotes = "";
-  setStatus("Preset loaded", "You can generate Harvey's first canonical PNG from these starter values.");
-  saveState();
-  renderState();
-}
-
-async function refreshFlipbookFrames({ focusLatest = false } = {}) {
+refs.fullBookPreview.addEventListener("change", async (event) => {
+  const uploadInput = event.target.closest("[data-page-upload-input]");
+  if (!uploadInput) return;
+  const pageId = uploadInput.dataset.pageId;
+  const file = uploadInput.files?.[0];
+  if (!file) return;
   try {
-    const response = await fetch("/api/outputs");
-    if (!response.ok) throw new Error("Unable to load slideshow frames.");
-    const result = await response.json();
-    state.outputFiles = Array.isArray(result.files) ? result.files : [];
-    if (!state.outputFiles.length) {
-      state.flipbookPlaying = false;
-      stopFlipbookTimer();
-    }
-    if (focusLatest && state.outputFiles.length) {
-      state.flipbookIndex = state.outputFiles.length - 1;
-    } else if (state.flipbookIndex >= state.outputFiles.length) {
-      state.flipbookIndex = 0;
-    }
-    saveState();
-    renderFlipbook();
-    if (state.flipbookPlaying) {
-      startFlipbookTimer();
-    }
+    await setPageImageFromFile(file, pageId);
   } catch (error) {
-    state.outputFiles = [];
-    state.flipbookIndex = 0;
-    state.flipbookPlaying = false;
-    stopFlipbookTimer();
+    setStatus("Image upload failed", error.message || "Could not attach the page image.");
+  } finally {
+    uploadInput.value = "";
+  }
+});
+
+refs.fullBookPreview.addEventListener("input", (event) => {
+  const editor = event.target.closest("[data-inline-page-text-editor]");
+  if (!editor) return;
+  const pageId = editor.dataset.pageId;
+  const page = activeBook().pages.find((item) => item.id === pageId);
+  if (!page) return;
+  const nextText = normalizeInlinePageText(editor.innerText);
+  if (page.text === nextText) return;
+  page.text = nextText;
+  syncManuscriptFromPages(activeBook());
+  touchActiveBook();
+  saveState();
+  refs.storyManuscript.value = activeBook().manuscript;
+  renderPageList();
+});
+
+refs.fullBookPreview.addEventListener("focusout", (event) => {
+  const editor = event.target.closest("[data-inline-page-text-editor]");
+  if (!editor) return;
+  const pageId = editor.dataset.pageId;
+  const page = activeBook().pages.find((item) => item.id === pageId);
+  if (!page) return;
+  const nextText = normalizeInlinePageText(editor.innerText);
+  if (page.text !== nextText) {
+    page.text = nextText;
+    syncManuscriptFromPages(activeBook());
+    touchActiveBook();
     saveState();
-    setStatus("Flipbook error", error.message || "Could not refresh the slideshow frames.");
-    renderFlipbook();
+    refs.storyManuscript.value = activeBook().manuscript;
+    renderPageList();
   }
-}
+  renderBookPreview();
+});
 
-function stepFlipbook(direction) {
-  if (!state.outputFiles.length) return;
-  state.flipbookIndex = (state.flipbookIndex + direction + state.outputFiles.length) % state.outputFiles.length;
+refs.pageList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-page-id]");
+  if (!button) return;
+  activeBook().activePageId = button.dataset.pageId;
   saveState();
-  renderFlipbook();
-}
+  render();
+});
 
-function setFlipbookPlaying(playing) {
-  state.flipbookPlaying = playing;
-  if (playing) {
-    startFlipbookTimer();
-  } else {
-    stopFlipbookTimer();
-  }
+refs.bookSelect.addEventListener("change", (event) => {
+  state.activeBookId = event.target.value;
   saveState();
-  renderFlipbook();
-}
+  setStatus("Book opened", `"${activeBook().projectTitle || "Untitled Book"}" is loaded.`);
+  render();
+});
 
-function stopFlipbookTimer() {
-  if (state.flipbookTimer) {
-    clearInterval(state.flipbookTimer);
-    state.flipbookTimer = null;
-  }
-}
-
-function startFlipbookTimer() {
-  stopFlipbookTimer();
-  if (!state.outputFiles.length) return;
-  state.flipbookTimer = setInterval(() => {
-    if (!state.flipbookPlaying || !state.outputFiles.length) return;
-    state.flipbookIndex = (state.flipbookIndex + 1) % state.outputFiles.length;
-    renderFlipbook();
-  }, state.flipbookDelay);
-}
+refs.characterList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-character-name]");
+  if (!button) return;
+  appendCharacter(button.dataset.characterName);
+});
 
 refs.coverInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -441,85 +2065,57 @@ refs.coverInput.addEventListener("change", async (event) => {
   await handleCoverFile(file);
 });
 
-refs.dropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  refs.dropzone.classList.add("is-dragging");
-});
-
-refs.dropzone.addEventListener("dragleave", () => {
-  refs.dropzone.classList.remove("is-dragging");
-});
-
-refs.dropzone.addEventListener("drop", async (event) => {
-  event.preventDefault();
-  refs.dropzone.classList.remove("is-dragging");
-  const file = event.dataTransfer?.files?.[0];
-  if (!file) return;
-  await handleCoverFile(file);
-});
-
 refs.clearCoverButton.addEventListener("click", () => {
-  state.coverFileName = "";
-  state.coverPreviewUrl = "";
-  state.coverReferenceUrl = "";
-  state.generatedImageUrl = "";
-  state.lastPrompt = "";
-  state.lastNotes = "";
-  setStatus("Cover cleared", "Upload the cover again if you want it to guide the next PNG.");
-  saveState();
-  renderState();
+  const book = activeBook();
+  book.coverFileName = "";
+  book.coverPreviewUrl = "";
+  book.coverReferenceUrl = "";
   refs.coverInput.value = "";
-});
-
-refs.characterForm.addEventListener("input", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-  const keyMap = {
-    projectTitle: "projectTitle",
-    characterName: "characterName",
-    characterRole: "characterRole",
-    visualTraits: "visualTraits",
-    birthState: "birthState",
-    distinctiveAnatomy: "distinctiveAnatomy",
-    expressionPose: "expressionPose",
-    styleNotes: "styleNotes",
-    coverStoryNotes: "coverStoryNotes",
-    promptSeed: "promptSeed",
-  };
-  const key = keyMap[target.id];
-  if (!key) return;
-  state[key] = target.value;
+  touchActiveBook();
   saveState();
-  renderHeroStats();
+  setStatus("Cover cleared", "New page illustrations will generate without a cover reference.");
+  render();
 });
-
-refs.characterForm.addEventListener("submit", generateCharacter);
-refs.loadExampleButton.addEventListener("click", loadExample);
 
 refs.copyPromptButton.addEventListener("click", async () => {
-  if (!state.lastPrompt) return;
+  const prompt = activePage().prompt;
+  if (!prompt) return;
   try {
-    await navigator.clipboard.writeText(state.lastPrompt);
-    setStatus("Prompt copied", "The generation prompt is on your clipboard.");
+    await navigator.clipboard.writeText(prompt);
+    setStatus("Prompt copied", "The page prompt is on your clipboard.");
   } catch {
     setStatus("Copy failed", "Your browser blocked clipboard access.");
   }
 });
 
-refs.refreshFlipbookButton.addEventListener("click", refreshFlipbookFrames);
-refs.prevFrameButton.addEventListener("click", () => stepFlipbook(-1));
-refs.nextFrameButton.addEventListener("click", () => stepFlipbook(1));
-refs.playFlipbookButton.addEventListener("click", () => setFlipbookPlaying(!state.flipbookPlaying));
-refs.flipbookSpeed.addEventListener("input", (event) => {
-  const value = Number(event.target.value);
-  if (!Number.isFinite(value)) return;
-  state.flipbookDelay = value;
-  saveState();
-  if (state.flipbookPlaying) {
-    startFlipbookTimer();
+async function bootstrap() {
+  const serverState = await loadStateFromServer();
+  if (serverState) {
+    state = serverState;
+  } else {
+    const localState = loadStateFromLocalStorage();
+    state = localState;
+    queueServerStateSave(true);
   }
-});
+  delete state.previewMode;
+  state.isGenerating = false;
+  state.generatingPageId = "";
+  ensureBookPresence();
+  if (!activeBook()) {
+    const book = exampleBook();
+    state.books = [book];
+    state.activeBookId = book.id;
+  }
+  if (!activeBook().activePageId || !activeBook().pages.some((page) => page.id === activeBook().activePageId)) {
+    activeBook().activePageId = activeBook().pages[0]?.id || "";
+  }
+  render();
+  loadCharacters();
+  loadDefaultCover();
+}
 
-renderState();
-loadDefaultCover();
-refreshFlipbookFrames();
+bootstrap();
+
+
+
+

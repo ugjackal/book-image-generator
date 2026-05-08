@@ -279,8 +279,75 @@
                 <p class="eyebrow">Cast</p>
                 <h2>Available characters</h2>
               </div>
+              <div class="character-card-actions">
+                <button class="ghost-button" id="newCharacterButton" type="button">New character</button>
+                <button class="ghost-button" id="seedCharacterButton" type="button" title="Create a character from a seed image">From seed</button>
+              </div>
             </div>
             <div class="character-list" id="characterList"></div>
+            <div class="character-editor" id="characterEditor" hidden>
+              <div class="character-editor-preview">
+                <div class="character-editor-thumbnail" id="characterEditorThumbnail"></div>
+                <div class="character-editor-copy">
+                  <p class="eyebrow">Selected character</p>
+                  <h3 id="characterEditorTitle">Select a character</h3>
+                  <p id="characterEditorSummary">Choose a cast member to tweak their visual notes, or start a new one from a seed image.</p>
+                  <p class="character-editor-status" id="characterEditorStatus"></p>
+                </div>
+              </div>
+              <div class="character-editor-source-note">Loaded from the character JSON profile. Open Advanced profile fields only when you want to tweak the source data.</div>
+              <details class="character-editor-advanced">
+                <summary>Advanced profile fields</summary>
+                <div class="character-editor-grid">
+                  <label class="field">
+                    <span>Name</span>
+                    <input id="characterEditorName" type="text" placeholder="Harvey" />
+                  </label>
+                  <label class="field">
+                    <span>Role</span>
+                    <input id="characterEditorRole" type="text" placeholder="Cat protagonist" />
+                  </label>
+                  <label class="field span-2">
+                    <span>Visual traits</span>
+                    <textarea id="characterEditorVisualTraits" rows="3" placeholder="Describe what the character looks like in the locked book style."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Birth state</span>
+                    <textarea id="characterEditorBirthState" rows="3" placeholder="Canonical background, starting condition, or origin details."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Distinctive anatomy</span>
+                    <textarea id="characterEditorDistinctiveAnatomy" rows="2" placeholder="What makes the silhouette recognizable?"></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Expression and pose</span>
+                    <textarea id="characterEditorExpressionPose" rows="2" placeholder="Curious, friendly, alert, and readable in motion."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Style notes</span>
+                    <textarea id="characterEditorStyleNotes" rows="3" placeholder="Keep the character in the book's locked style."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Personality</span>
+                    <textarea id="characterEditorPersonality" rows="2" placeholder="Temperament, energy, and presence."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Group identity</span>
+                    <textarea id="characterEditorGroupIdentity" rows="2" placeholder="How this character fits into a group or family."></textarea>
+                  </label>
+                  <label class="field span-2">
+                    <span>Family notes</span>
+                    <textarea id="characterEditorFamilyNotes" rows="2" placeholder="Special notes for recurring family or group relationships."></textarea>
+                  </label>
+                </div>
+              </details>
+              <div class="character-editor-toolbar">
+                <button class="ghost-button" id="useCharacterOnPageButton" type="button">Use on page</button>
+                <button class="ghost-button" id="saveCharacterButton" type="button">Save profile</button>
+                <button class="ghost-button" id="generateCharacterThumbnailButton" type="button">Generate thumbnail</button>
+              </div>
+              <input id="characterSeedInput" type="file" accept="image/*" hidden />
+            </div>
           </section>
         </section>
 

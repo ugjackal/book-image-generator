@@ -86,6 +86,27 @@ const refs = {
   increasePageTextScale: $("#increasePageTextScale"),
   characterNames: $("#characterNames"),
   characterList: $("#characterList"),
+  characterEditor: $("#characterEditor"),
+  characterEditorThumbnail: $("#characterEditorThumbnail"),
+  characterEditorTitle: $("#characterEditorTitle"),
+  characterEditorSummary: $("#characterEditorSummary"),
+  characterEditorStatus: $("#characterEditorStatus"),
+  characterEditorName: $("#characterEditorName"),
+  characterEditorRole: $("#characterEditorRole"),
+  characterEditorVisualTraits: $("#characterEditorVisualTraits"),
+  characterEditorBirthState: $("#characterEditorBirthState"),
+  characterEditorDistinctiveAnatomy: $("#characterEditorDistinctiveAnatomy"),
+  characterEditorExpressionPose: $("#characterEditorExpressionPose"),
+  characterEditorStyleNotes: $("#characterEditorStyleNotes"),
+  characterEditorPersonality: $("#characterEditorPersonality"),
+  characterEditorGroupIdentity: $("#characterEditorGroupIdentity"),
+  characterEditorFamilyNotes: $("#characterEditorFamilyNotes"),
+  newCharacterButton: $("#newCharacterButton"),
+  seedCharacterButton: $("#seedCharacterButton"),
+  saveCharacterButton: $("#saveCharacterButton"),
+  generateCharacterThumbnailButton: $("#generateCharacterThumbnailButton"),
+  useCharacterOnPageButton: $("#useCharacterOnPageButton"),
+  characterSeedInput: $("#characterSeedInput"),
   fullBookPreview: $("#fullBookPreview"),
   pageEditorCard: $("#pageEditorCard"),
   statusLabel: $("#statusLabel"),
@@ -191,6 +212,9 @@ const legacyBookFromState = (parsed) => ({
 
 let state = defaultState();
 let stateSaveTimer = null;
+let activeCharacterName = "";
+let characterDraft = null;
+let characterEditorOpen = false;
 
 function normalizeLoadedState(parsed) {
   const fallback = defaultState();
@@ -1059,23 +1083,181 @@ function renderPageList() {
     .join("");
 }
 
+function normalizeCharacterRecord(character = {}) {
+  return {
+    name: String(character.name || "").trim(),
+    role: String(character.role || character.characterRole || "").trim(),
+    visualTraits: String(character.visualTraits || character.visual_traits || "").trim(),
+    birthState: String(character.birthState || character.birth_state || "").trim(),
+    distinctiveAnatomy: String(character.distinctiveAnatomy || character.distinctive_anatomy || "").trim(),
+    expressionPose: String(character.expressionPose || character.expression_pose || "").trim(),
+    styleNotes: String(character.styleNotes || character.style_notes || "").trim(),
+    personality: String(character.personality || "").trim(),
+    groupIdentity: String(character.groupIdentity || character.group_identity || "").trim(),
+    familyNotes: String(character.familyNotes || character.family_notes || "").trim(),
+    thumbnailUrl: String(character.thumbnailUrl || character.thumbnail_url || "").trim(),
+    seedImageUrl: String(character.seedImageUrl || character.seed_image_url || "").trim(),
+    file: String(character.file || "").trim(),
+  };
+}
+
+function blankCharacterDraft() {
+  return {
+    originalName: "",
+    name: "",
+    role: "",
+    visualTraits: "",
+    birthState: "",
+    distinctiveAnatomy: "",
+    expressionPose: "",
+    styleNotes: "",
+    personality: "",
+    groupIdentity: "",
+    familyNotes: "",
+    thumbnailUrl: "",
+    seedImageUrl: "",
+    seedImageDataUrl: "",
+    seedImageFileName: "",
+    isNew: false,
+  };
+}
+
+function activeCharacter() {
+  return state.characters.find((character) => character.name === activeCharacterName) || null;
+}
+
+function characterBadge(characterName) {
+  const trimmed = String(characterName || "").trim();
+  if (!trimmed) return "C";
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const initials = words.length > 1 ? `${words[0][0] || ""}${words[1][0] || ""}` : trimmed.slice(0, 2);
+  return initials.toUpperCase();
+}
+
+function setCharacterDraftFromRecord(character, { isNew = false } = {}) {
+  const normalized = normalizeCharacterRecord(character);
+  characterEditorOpen = true;
+  characterDraft = {
+    originalName: normalized.name,
+    name: normalized.name,
+    role: normalized.role,
+    visualTraits: normalized.visualTraits,
+    birthState: normalized.birthState,
+    distinctiveAnatomy: normalized.distinctiveAnatomy,
+    expressionPose: normalized.expressionPose,
+    styleNotes: normalized.styleNotes,
+    personality: normalized.personality,
+    groupIdentity: normalized.groupIdentity,
+    familyNotes: normalized.familyNotes,
+    thumbnailUrl: normalized.thumbnailUrl,
+    seedImageUrl: normalized.seedImageUrl,
+    seedImageDataUrl: "",
+    seedImageFileName: "",
+    isNew,
+  };
+  activeCharacterName = normalized.name;
+  renderCharacterEditor();
+}
+
+function setNewCharacterDraft() {
+  characterEditorOpen = true;
+  characterDraft = {
+    ...blankCharacterDraft(),
+    isNew: true,
+  };
+  activeCharacterName = "";
+  renderCharacterEditor();
+}
+
 function renderCharacters() {
-  refs.characterNames.innerHTML = state.characters
+  const characters = state.characters.map(normalizeCharacterRecord);
+  state.characters = characters;
+  refs.characterNames.innerHTML = characters
     .map((character) => `<option value="${escapeHtml(character.name)}"></option>`)
     .join("");
 
-  refs.characterList.innerHTML = state.characters.length
-    ? state.characters
+  refs.characterList.innerHTML = characters.length
+    ? characters
         .map(
           (character) => `
-            <button class="character-chip" type="button" data-character-name="${escapeHtml(character.name)}">
-              <strong>${escapeHtml(character.name)}</strong>
-              <span>${escapeHtml(character.role || "Character")}</span>
+            <button class="character-chip${character.name === activeCharacterName ? " is-active" : ""}" type="button" data-character-name="${escapeHtml(character.name)}">
+              <span class="character-chip-thumb">
+                ${
+                  character.thumbnailUrl || character.seedImageUrl
+                    ? `<img src="${escapeHtml(character.thumbnailUrl || character.seedImageUrl)}" alt="${escapeHtml(character.name)} thumbnail" loading="lazy" />`
+                  : `<span class="character-chip-initials" aria-hidden="true">${escapeHtml(characterBadge(character.name))}</span>`
+                }
+              </span>
+              <span class="character-chip-copy">
+                <strong>${escapeHtml(character.name)}</strong>
+                <span>${escapeHtml(character.role || "Character")}</span>
+              </span>
             </button>
           `
         )
         .join("")
     : `<div class="empty-state compact">No character profiles found yet.</div>`;
+
+  renderCharacterEditor();
+}
+
+function renderCharacterEditor() {
+  if (!refs.characterEditor) return;
+  const draft = characterDraft || blankCharacterDraft();
+  const selected = draft.name ? activeCharacter() : null;
+  const previewUrl = draft.seedImageDataUrl || draft.thumbnailUrl || draft.seedImageUrl || selected?.thumbnailUrl || selected?.seedImageUrl || "";
+  const hasOpenDraft = Boolean(characterEditorOpen && (draft.isNew || draft.originalName || activeCharacterName.trim()));
+  const shouldShow = Boolean(characterEditorOpen && hasOpenDraft);
+  refs.characterEditor.hidden = !shouldShow;
+  refs.characterEditor.style.display = shouldShow ? "" : "none";
+  if (!shouldShow) return;
+  refs.characterEditorName.value = draft.name || "";
+  refs.characterEditorRole.value = draft.role || "";
+  refs.characterEditorVisualTraits.value = draft.visualTraits || "";
+  if (refs.characterEditorBirthState) refs.characterEditorBirthState.value = draft.birthState || "";
+  refs.characterEditorDistinctiveAnatomy.value = draft.distinctiveAnatomy || "";
+  refs.characterEditorExpressionPose.value = draft.expressionPose || "";
+  refs.characterEditorStyleNotes.value = draft.styleNotes || "";
+  if (refs.characterEditorPersonality) refs.characterEditorPersonality.value = draft.personality || "";
+  if (refs.characterEditorGroupIdentity) refs.characterEditorGroupIdentity.value = draft.groupIdentity || "";
+  if (refs.characterEditorFamilyNotes) refs.characterEditorFamilyNotes.value = draft.familyNotes || "";
+  syncCharacterEditorChrome(previewUrl, draft);
+}
+
+function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || blankCharacterDraft()) {
+  if (!refs.characterEditor) return;
+  const hasOpenDraft = Boolean(characterEditorOpen && (draft.isNew || draft.originalName || activeCharacterName.trim()));
+  const shouldShow = Boolean(characterEditorOpen && hasOpenDraft);
+  refs.characterEditor.hidden = !shouldShow;
+  refs.characterEditor.style.display = shouldShow ? "" : "none";
+  if (!shouldShow) return;
+  refs.characterEditor.classList.toggle("is-empty", !draft.name);
+  refs.characterEditorTitle.textContent = draft.name || "Select a character";
+  refs.characterEditorSummary.textContent = draft.name
+    ? "Tweak the cast profile, then save it for the whole studio."
+    : "Choose a cast member to tweak their visual notes, or start a new one from a seed image.";
+  refs.characterEditorStatus.textContent = draft.seedImageFileName
+    ? `Seed image loaded: ${draft.seedImageFileName}`
+    : draft.seedImageUrl
+    ? "Seed image already attached to this profile."
+    : draft.thumbnailUrl
+    ? "Thumbnail already generated for this character."
+    : "No thumbnail yet.";
+
+  refs.characterEditorThumbnail.innerHTML = previewUrl
+    ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(draft.name || "Character")} preview" loading="lazy" />`
+    : `<div class="character-editor-placeholder"><span>${escapeHtml(characterBadge(draft.name || "Character"))}</span></div>`;
+
+  if (refs.useCharacterOnPageButton) {
+    refs.useCharacterOnPageButton.disabled = !draft.name;
+  }
+  if (refs.saveCharacterButton) {
+    refs.saveCharacterButton.textContent = draft.isNew ? "Create profile" : "Save profile";
+    refs.saveCharacterButton.disabled = !draft.name.trim();
+  }
+  if (refs.generateCharacterThumbnailButton) {
+    refs.generateCharacterThumbnailButton.disabled = !draft.name.trim();
+  }
 }
 
 function renderFullBookPreview() {
@@ -1196,26 +1378,23 @@ function renderFullBookPreviewMarkup(book) {
               : layout === "stacked-text-top"
               ? `<div class="mini-stack">${textMarkup}${imageMarkup}</div>`
               : `<div class="mini-stack">${imageMarkup}${textMarkup}</div>`;
-          const imageControls =
-            page.imageUrl
-              ? `
-              <div class="page-image-controls" data-page-id="${escapeHtml(page.id)}">
-                  <div class="page-image-controls-row page-image-adjust-row">
-                    <div class="page-image-nudge-group">
-                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up">&#8593;</button>
-                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left">&#8592;</button>
-                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image">&#10226;</button>
-                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right">&#8594;</button>
-                      <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down">&#8595;</button>
-                    </div>
-                    <div class="page-image-scale-group">
-                      <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller">&#8722;</button>
-                      <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger">+</button>
-                    </div>
-                  </div>
+          const imageControls = `
+            <div class="page-image-controls" data-page-id="${escapeHtml(page.id)}">
+              <div class="page-image-controls-row page-image-adjust-row">
+                <div class="page-image-nudge-group">
+                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up"${page.imageUrl ? "" : " disabled"}>&#8593;</button>
+                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left"${page.imageUrl ? "" : " disabled"}>&#8592;</button>
+                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image"${page.imageUrl ? "" : " disabled"}>&#10226;</button>
+                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right"${page.imageUrl ? "" : " disabled"}>&#8594;</button>
+                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down"${page.imageUrl ? "" : " disabled"}>&#8595;</button>
                 </div>
-              `
-              : "";
+                <div class="page-image-scale-group">
+                  <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller"${page.imageUrl ? "" : " disabled"}>&#8722;</button>
+                  <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger"${page.imageUrl ? "" : " disabled"}>+</button>
+                </div>
+              </div>
+            </div>
+          `;
           return `
             <article class="full-book-page" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
               <header class="full-book-page-head">
@@ -1247,10 +1426,6 @@ function updatePageById(pageId, values) {
   saveState();
   renderPageList();
   renderBookPreview();
-}
-
-function resolvePreviewPageId(target) {
-  return target.closest("[data-page-id]")?.dataset.pageId || activePage().id;
 }
 
 async function setPageImageFromFile(file, pageId = activePage().id) {
@@ -1467,7 +1642,7 @@ async function loadCharacters() {
     const response = await fetch("/api/characters");
     if (!response.ok) throw new Error("Unable to load character profiles.");
     const result = await response.json();
-    state.characters = Array.isArray(result.characters) ? result.characters : [];
+    state.characters = Array.isArray(result.characters) ? result.characters.map(normalizeCharacterRecord) : [];
     renderCharacters();
   } catch (error) {
     state.characters = [];
@@ -1511,6 +1686,124 @@ function splitNames(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+async function saveCharacterDraft({ generateThumbnail = false } = {}) {
+  const draft = characterDraft || blankCharacterDraft();
+  const name = draft.name.trim();
+  if (!name) {
+    setStatus("Missing character name", "Give the character a name before saving.");
+    return;
+  }
+
+  const book = activeBook();
+  const payload = {
+    original_name: draft.originalName || "",
+    name,
+    role: draft.role || "",
+    visualTraits: draft.visualTraits || "",
+    birthState: draft.birthState || "",
+    distinctiveAnatomy: draft.distinctiveAnatomy || "",
+    expressionPose: draft.expressionPose || "",
+    styleNotes: draft.styleNotes || "",
+    personality: draft.personality || "",
+    groupIdentity: draft.groupIdentity || "",
+    familyNotes: draft.familyNotes || "",
+    seed_image_data_url: draft.seedImageDataUrl || "",
+    seed_image_url: draft.seedImageUrl || "",
+  };
+
+  if (generateThumbnail) {
+    payload.save_profile = true;
+    payload.project_title = book.projectTitle || "Untitled book";
+    payload.character_name = name;
+    payload.character_role = draft.role || "";
+    payload.visual_traits = draft.visualTraits || "";
+    payload.birth_state = draft.birthState || "";
+    payload.distinctive_anatomy = draft.distinctiveAnatomy || "";
+    payload.expression_pose = draft.expressionPose || "";
+    payload.style_notes = draft.styleNotes || "";
+    payload.personality = draft.personality || "";
+    payload.group_identity = draft.groupIdentity || "";
+    payload.family_notes = draft.familyNotes || "";
+    payload.cover_data_url = book.coverReferenceUrl || book.coverPreviewUrl || "";
+    payload.seed_image_data_url = draft.seedImageDataUrl || draft.seedImageUrl || "";
+
+    setStatus("Generating thumbnail", `Creating a character thumbnail for ${name}.`);
+    const response = await fetch("/api/generate-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Character thumbnail generation failed.");
+    }
+    characterDraft.thumbnailUrl = result.file_url || "";
+    characterDraft.seedImageUrl = result.seedImageUrl || characterDraft.seedImageUrl;
+    characterDraft.seedImageDataUrl = "";
+    characterDraft.seedImageFileName = "";
+    characterDraft.originalName = name;
+    characterDraft.isNew = false;
+    activeCharacterName = name;
+    setStatus("Thumbnail ready", `${name} now has a styled character thumbnail.`);
+  } else {
+    setStatus("Saving character", `Updating the character profile for ${name}.`);
+    const response = await fetch("/api/characters", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Could not save the character profile.");
+    }
+    characterDraft.originalName = name;
+    characterDraft.isNew = false;
+    if (result.character) {
+      characterDraft.thumbnailUrl = result.character.thumbnailUrl || characterDraft.thumbnailUrl;
+      characterDraft.seedImageUrl = result.character.seedImageUrl || characterDraft.seedImageUrl;
+    }
+    activeCharacterName = name;
+    setStatus("Character saved", `${name} is now available for this book.`);
+  }
+
+  characterDraft.name = name;
+  await loadCharacters();
+  const refreshed = state.characters.find((character) => character.name === name);
+  if (refreshed) {
+    characterDraft = {
+      ...blankCharacterDraft(),
+      ...refreshed,
+      originalName: refreshed.name,
+      name: refreshed.name,
+      role: refreshed.role,
+      visualTraits: refreshed.visualTraits,
+      birthState: refreshed.birthState,
+      distinctiveAnatomy: refreshed.distinctiveAnatomy,
+      expressionPose: refreshed.expressionPose,
+      styleNotes: refreshed.styleNotes,
+      personality: refreshed.personality,
+      groupIdentity: refreshed.groupIdentity,
+      familyNotes: refreshed.familyNotes,
+      thumbnailUrl: refreshed.thumbnailUrl,
+      seedImageUrl: refreshed.seedImageUrl,
+      seedImageDataUrl: "",
+      seedImageFileName: "",
+      isNew: false,
+    };
+  }
+  renderCharacterEditor();
+}
+
+async function setCharacterSeedFromFile(file) {
+  const dataUrl = await resizeFileToDataUrl(file, 1024, 0.9);
+  if (!characterDraft) {
+    setNewCharacterDraft();
+  }
+  characterDraft.seedImageDataUrl = dataUrl;
+  characterDraft.seedImageFileName = file.name;
+  renderCharacterEditor();
 }
 
 function appendCharacter(name) {
@@ -1896,7 +2189,7 @@ refs.pageForm.addEventListener("input", (event) => {
 });
 
 refs.fullBookPreview.addEventListener("click", (event) => {
-  const pageId = resolvePreviewPageId(event.target);
+  const pageId = event.target.closest(".full-book-page")?.dataset.pageId || activePage().id;
   const generateButton = event.target.closest("[data-generate-page-id]");
   if (generateButton) {
     generatePageForId(generateButton.dataset.generatePageId);
@@ -2053,10 +2346,83 @@ refs.bookSelect.addEventListener("change", (event) => {
   render();
 });
 
+refs.newCharacterButton.addEventListener("click", () => {
+  setNewCharacterDraft();
+  refs.characterEditorName?.focus();
+});
+
+refs.seedCharacterButton.addEventListener("click", () => {
+  setNewCharacterDraft();
+  refs.characterSeedInput?.click();
+});
+
 refs.characterList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-character-name]");
   if (!button) return;
-  appendCharacter(button.dataset.characterName);
+  const name = button.dataset.characterName;
+  const character = state.characters.find((item) => item.name === name);
+  if (character) {
+    setCharacterDraftFromRecord(character);
+  }
+});
+
+refs.characterEditor.addEventListener("input", (event) => {
+  if (!characterDraft) {
+    characterDraft = blankCharacterDraft();
+  }
+  const map = {
+    characterEditorName: "name",
+    characterEditorRole: "role",
+    characterEditorVisualTraits: "visualTraits",
+    characterEditorBirthState: "birthState",
+    characterEditorDistinctiveAnatomy: "distinctiveAnatomy",
+    characterEditorExpressionPose: "expressionPose",
+    characterEditorStyleNotes: "styleNotes",
+    characterEditorPersonality: "personality",
+    characterEditorGroupIdentity: "groupIdentity",
+    characterEditorFamilyNotes: "familyNotes",
+  };
+  const key = map[event.target.id];
+  if (!key) return;
+  characterDraft[key] = event.target.value;
+  if (key === "name") {
+    activeCharacterName = event.target.value.trim();
+  }
+  syncCharacterEditorChrome(characterDraft.seedImageDataUrl || characterDraft.thumbnailUrl || characterDraft.seedImageUrl || "");
+});
+
+refs.characterSeedInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    await setCharacterSeedFromFile(file);
+    setStatus("Seed image loaded", `${file.name} is ready to shape a new character.`);
+  } catch (error) {
+    setStatus("Seed image failed", error.message || "Could not load the seed image.");
+  } finally {
+    event.target.value = "";
+  }
+});
+
+refs.saveCharacterButton.addEventListener("click", async () => {
+  try {
+    await saveCharacterDraft({ generateThumbnail: false });
+  } catch (error) {
+    setStatus("Character save failed", error.message || "Could not save the character profile.");
+  }
+});
+
+refs.generateCharacterThumbnailButton.addEventListener("click", async () => {
+  try {
+    await saveCharacterDraft({ generateThumbnail: true });
+  } catch (error) {
+    setStatus("Thumbnail generation failed", error.message || "Could not generate the character thumbnail.");
+  }
+});
+
+refs.useCharacterOnPageButton.addEventListener("click", () => {
+  if (!characterDraft?.name) return;
+  appendCharacter(characterDraft.name);
 });
 
 refs.coverInput.addEventListener("change", async (event) => {

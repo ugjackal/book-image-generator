@@ -55,6 +55,142 @@ def slugify(value: str) -> str:
     return "".join(chars).strip("-")
 
 
+def data_url_to_bytes(data_url: str) -> bytes:
+    if not data_url.startswith("data:") or "," not in data_url:
+        raise ValueError("Expected a data URL.")
+    _, encoded = data_url.split(",", 1)
+    return base64.b64decode(encoded)
+
+
+def resolve_image_reference(reference: str) -> str:
+    value = str(reference or "").strip()
+    if not value:
+        return ""
+    if value.startswith("data:"):
+        return value
+    if value.startswith("/"):
+        path = BASE_DIR / value.lstrip("/")
+        if path.exists():
+            return image_file_to_data_url(path)
+        return ""
+    path = Path(value)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    if path.exists():
+        return image_file_to_data_url(path)
+    return ""
+
+
+def write_data_url_to_file(data_url: str, output_dir: Path, file_prefix: str) -> str:
+    image_bytes = data_url_to_bytes(data_url)
+    data_header = data_url.split(",", 1)[0]
+    mime_type = data_header[5:].split(";", 1)[0].strip() if data_header.startswith("data:") else ""
+    extension = mimetypes.guess_extension(mime_type) or ".png"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_name = f"{slugify(file_prefix) or 'generated-image'}-{secrets.token_hex(4)}{extension}"
+    file_path = output_dir / file_name
+    file_path.write_bytes(image_bytes)
+    return f"/{file_path.relative_to(BASE_DIR).as_posix()}"
+
+
+def find_character_profile_path(name: str) -> Path:
+    normalized = slugify(name)
+    if not normalized:
+        return CHARACTER_DIR / "character.json"
+
+    exact_name = str(name).strip().casefold()
+    if CHARACTER_DIR.exists():
+        for path in sorted(CHARACTER_DIR.glob("*.json")):
+            if path.name == "scene-style.json":
+                continue
+            if slugify(path.stem) == normalized or path.stem.casefold() == exact_name:
+                return path
+            try:
+                profile = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            profile_name = str(profile.get("name", "")).strip()
+            if profile_name and (profile_name.casefold() == exact_name or slugify(profile_name) == normalized):
+                return path
+    return CHARACTER_DIR / f"{normalized}.json"
+
+
+def save_character_profile(payload: dict[str, Any], *, thumbnail_url: str = "") -> dict[str, Any]:
+    from datetime import datetime, timezone
+
+    name = str(payload.get("name") or payload.get("character_name") or "").strip()
+    if not name:
+        raise ValueError("Character name is required.")
+
+    original_name = str(payload.get("original_name") or payload.get("originalName") or "").strip()
+    source_name = original_name or name
+    existing_path = find_character_profile_path(source_name)
+    existing_profile = load_character_profile(source_name) if existing_path.exists() else {}
+    seed_image_reference = str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or "").strip()
+    seed_image_url = str(payload.get("seed_image_url") or payload.get("seedImageUrl") or existing_profile.get("seedImageUrl", "")).strip()
+
+    if seed_image_reference.startswith("data:"):
+        seed_image_url = write_data_url_to_file(seed_image_reference, OUTPUT_DIR / "characters", f"{name}-seed")
+    elif seed_image_reference and not seed_image_url:
+        seed_image_url = seed_image_reference
+
+    profile = {
+        "name": name,
+        "role": str(payload.get("role") or payload.get("character_role") or existing_profile.get("role", "")).strip(),
+        "visualTraits": str(payload.get("visualTraits") or payload.get("visual_traits") or existing_profile.get("visualTraits", "")).strip(),
+        "distinctiveAnatomy": str(payload.get("distinctiveAnatomy") or payload.get("distinctive_anatomy") or existing_profile.get("distinctiveAnatomy", "")).strip(),
+        "expressionPose": str(payload.get("expressionPose") or payload.get("expression_pose") or existing_profile.get("expressionPose", "")).strip(),
+        "styleNotes": str(payload.get("styleNotes") or payload.get("style_notes") or existing_profile.get("styleNotes", "")).strip(),
+        "seedImageUrl": seed_image_url,
+        "thumbnailUrl": str(thumbnail_url or payload.get("thumbnailUrl") or payload.get("thumbnail_url") or existing_profile.get("thumbnailUrl", "")).strip(),
+        "createdAt": existing_profile.get("createdAt") or payload.get("createdAt") or payload.get("created_at") or "",
+        "updatedAt": "",
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    if not profile["createdAt"]:
+        profile["createdAt"] = now
+    profile["updatedAt"] = now
+
+    CHARACTER_DIR.mkdir(parents=True, exist_ok=True)
+    path = find_character_profile_path(name)
+    if original_name and slugify(original_name) != slugify(name) and existing_path.exists() and existing_path != path:
+        try:
+            existing_path.unlink()
+        except OSError:
+            pass
+    path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    return profile
+
+
+def list_character_summaries() -> list[dict[str, Any]]:
+    characters: list[dict[str, Any]] = []
+    if not CHARACTER_DIR.exists():
+        return characters
+
+    for path in sorted(CHARACTER_DIR.glob("*.json")):
+        if path.name == "scene-style.json":
+            continue
+        profile = load_character_profile(path.stem)
+        characters.append(
+            {
+                "name": profile.get("name", path.stem.title()),
+                "role": profile.get("role", ""),
+                "visualTraits": profile.get("visualTraits", ""),
+                "birthState": profile.get("birthState", ""),
+                "distinctiveAnatomy": profile.get("distinctiveAnatomy", ""),
+                "expressionPose": profile.get("expressionPose", ""),
+                "styleNotes": profile.get("styleNotes", ""),
+                "personality": profile.get("personality", ""),
+                "groupIdentity": profile.get("groupIdentity", ""),
+                "familyNotes": profile.get("familyNotes", ""),
+                "thumbnailUrl": profile.get("thumbnailUrl", ""),
+                "seedImageUrl": profile.get("seedImageUrl", ""),
+                "file": path.name,
+            }
+        )
+    return characters
+
+
 def build_prompt(payload: dict[str, Any]) -> str:
     project_title = str(payload.get("project_title", "")).strip() or "Untitled book"
     character_name = str(payload.get("character_name", "")).strip() or "First main character"
@@ -69,6 +205,7 @@ def build_prompt(payload: dict[str, Any]) -> str:
     style_notes = str(payload.get("style_notes", "")).strip() or str(character_profile.get("styleNotes", "")).strip()
     cover_story_notes = str(payload.get("cover_story_notes", "")).strip()
     prompt_seed = str(payload.get("prompt_seed", "")).strip()
+    seed_image_present = bool(str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or "").strip())
 
     lines = [
         f"Create the first canonical main character for the picture book '{project_title}'.",
@@ -101,6 +238,8 @@ def build_prompt(payload: dict[str, Any]) -> str:
         lines.append(f"Cover story notes: {cover_story_notes}.")
     if prompt_seed:
         lines.append(f"Prompt seed: {prompt_seed}.")
+    if seed_image_present:
+        lines.append("Use the uploaded seed image as the identity anchor for this character, then redraw it in the book's locked style.")
 
     lines.extend(
         [
@@ -253,7 +392,7 @@ def layout_guidance(layout: str) -> str:
 
 
 def load_character_profile(name: str) -> dict[str, Any]:
-    path = CHARACTER_DIR / f"{name.lower()}.json"
+    path = find_character_profile_path(name)
     if not path.exists():
         return {}
     try:
@@ -302,6 +441,7 @@ def create_image(
     output_dir: Path,
     file_prefix: str,
     cover_data_url: str = "",
+    reference_data_urls: list[str] | None = None,
     background: str = "auto",
     size: str = "1536x1024",
 ) -> dict[str, Any]:
@@ -316,11 +456,17 @@ def create_image(
         }
     ]
     cover_used = False
-    if cover_data_url:
+    image_references = [cover_data_url] if cover_data_url else []
+    if reference_data_urls:
+        image_references.extend(reference_data_urls)
+    for reference in image_references:
+        resolved_reference = resolve_image_reference(reference)
+        if not resolved_reference:
+            continue
         input_content.append(
             {
                 "type": "input_image",
-                "image_url": cover_data_url,
+                "image_url": resolved_reference,
                 "detail": "high",
             }
         )
@@ -376,14 +522,21 @@ def create_image(
 def generate_character_image(payload: dict[str, Any]) -> dict[str, Any]:
     prompt = build_prompt(payload)
     character_name = str(payload.get("character_name", "first-character")) or "first-character"
+    cover_data_url = str(payload.get("cover_data_url") or "").strip()
+    seed_image_data_url = str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or "").strip()
     result = create_image(
         prompt=prompt,
         output_dir=OUTPUT_DIR,
         file_prefix=character_name,
-        cover_data_url=str(payload.get("cover_data_url") or "").strip(),
+        cover_data_url=cover_data_url,
+        reference_data_urls=[reference for reference in [seed_image_data_url] if reference and reference != cover_data_url],
         background="transparent",
         size="1024x1536",
     )
+    if payload.get("save_profile") or payload.get("saveProfile"):
+        profile_payload = dict(payload)
+        profile_payload["seed_image_data_url"] = seed_image_data_url
+        save_character_profile(profile_payload, thumbnail_url=result["file_url"])
     result.update(
         {
             "characters": {
@@ -431,6 +584,9 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/state":
             self.handle_put_state()
             return
+        if parsed.path == "/api/characters":
+            self.handle_upsert_character()
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -440,6 +596,9 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/generate-page-scene":
             self.handle_generate_page_scene()
+            return
+        if parsed.path == "/api/characters":
+            self.handle_upsert_character()
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
 
@@ -459,20 +618,7 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
         self.send_json(HTTPStatus.OK, {"files": files})
 
     def handle_list_characters(self) -> None:
-        characters = []
-        for path in sorted(CHARACTER_DIR.glob("*.json")):
-            if path.name == "scene-style.json":
-                continue
-            profile = load_character_profile(path.stem)
-            characters.append(
-                {
-                    "name": profile.get("name", path.stem.title()),
-                    "role": profile.get("role", ""),
-                    "visual_traits": profile.get("visualTraits", ""),
-                    "file": path.name,
-                }
-            )
-        self.send_json(HTTPStatus.OK, {"characters": characters})
+        self.send_json(HTTPStatus.OK, {"characters": list_character_summaries()})
 
     def handle_get_state(self) -> None:
         with STATE_LOCK:
@@ -527,6 +673,40 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
                 },
             )
 
+    def handle_upsert_character(self) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(content_length)
+            payload = json.loads(body.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"Invalid JSON payload: {exc}"},
+            )
+            return
+
+        if not isinstance(payload, dict):
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "Character payload must be a JSON object."},
+            )
+            return
+
+        try:
+            profile = save_character_profile(payload)
+            self.send_json(
+                HTTPStatus.OK,
+                {
+                    "character": profile,
+                    "characters": list_character_summaries(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": f"Could not save character profile: {exc}"},
+            )
+
     def handle_generate_page_scene(self) -> None:
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -577,6 +757,7 @@ def main() -> None:
         print(f"LAN access enabled on this machine's network IP, for example http://<your-ip>:{port}")
     print("API endpoint: POST /api/generate-character")
     print("API endpoint: POST /api/generate-page-scene")
+    print("API endpoint: GET/PUT /api/characters")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

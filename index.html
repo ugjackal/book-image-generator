@@ -307,6 +307,17 @@
                     <span>Role</span>
                     <input id="characterEditorRole" type="text" placeholder="Cat protagonist" />
                   </label>
+                  <label class="field">
+                    <span>Group reference</span>
+                    <div class="checkbox-row">
+                      <input id="characterEditorIsGroupReference" type="checkbox" />
+                      <span>Use this profile as a group reference</span>
+                    </div>
+                  </label>
+                  <label class="field span-2">
+                    <span>Group members</span>
+                    <textarea id="characterEditorGroupMembers" rows="2" placeholder="Kim, Tony"></textarea>
+                  </label>
                   <label class="field span-2">
                     <span>Visual traits</span>
                     <textarea id="characterEditorVisualTraits" rows="3" placeholder="Describe what the character looks like in the locked book style."></textarea>
@@ -344,7 +355,8 @@
               <div class="character-editor-toolbar">
                 <button class="ghost-button" id="useCharacterOnPageButton" type="button">Use on page</button>
                 <button class="ghost-button" id="saveCharacterButton" type="button">Save profile</button>
-                <button class="ghost-button" id="generateCharacterThumbnailButton" type="button">Generate thumbnail</button>
+                <button class="ghost-button" id="analyzeCharacterSeedButton" type="button" title="Read the seed image and fill the profile fields">Analyze seed</button>
+                <button class="ghost-button" id="generateCharacterThumbnailButton" type="button">Generate Character</button>
               </div>
               <input id="characterSeedInput" type="file" accept="image/*" hidden />
             </div>

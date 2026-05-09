@@ -62,6 +62,41 @@ def data_url_to_bytes(data_url: str) -> bytes:
     return base64.b64decode(encoded)
 
 
+def extract_json_object(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        raise ValueError("Empty model response.")
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        parsed = json.loads(raw[start : end + 1])
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("Model response did not contain a JSON object.")
+
+
+def parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_name_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
+
+
 def resolve_image_reference(reference: str) -> str:
     value = str(reference or "").strip()
     if not value:
@@ -128,6 +163,7 @@ def save_character_profile(payload: dict[str, Any], *, thumbnail_url: str = "") 
     existing_profile = load_character_profile(source_name) if existing_path.exists() else {}
     seed_image_reference = str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or "").strip()
     seed_image_url = str(payload.get("seed_image_url") or payload.get("seedImageUrl") or existing_profile.get("seedImageUrl", "")).strip()
+    group_members = parse_name_list(payload.get("groupMembers") or payload.get("group_members") or existing_profile.get("groupMembers", []))
 
     if seed_image_reference.startswith("data:"):
         seed_image_url = write_data_url_to_file(seed_image_reference, OUTPUT_DIR / "characters", f"{name}-seed")
@@ -138,9 +174,15 @@ def save_character_profile(payload: dict[str, Any], *, thumbnail_url: str = "") 
         "name": name,
         "role": str(payload.get("role") or payload.get("character_role") or existing_profile.get("role", "")).strip(),
         "visualTraits": str(payload.get("visualTraits") or payload.get("visual_traits") or existing_profile.get("visualTraits", "")).strip(),
+        "birthState": str(payload.get("birthState") or payload.get("birth_state") or existing_profile.get("birthState", "")).strip(),
         "distinctiveAnatomy": str(payload.get("distinctiveAnatomy") or payload.get("distinctive_anatomy") or existing_profile.get("distinctiveAnatomy", "")).strip(),
         "expressionPose": str(payload.get("expressionPose") or payload.get("expression_pose") or existing_profile.get("expressionPose", "")).strip(),
         "styleNotes": str(payload.get("styleNotes") or payload.get("style_notes") or existing_profile.get("styleNotes", "")).strip(),
+        "personality": str(payload.get("personality") or payload.get("personality_notes") or existing_profile.get("personality", "")).strip(),
+        "groupIdentity": str(payload.get("groupIdentity") or payload.get("group_identity") or existing_profile.get("groupIdentity", "")).strip(),
+        "familyNotes": str(payload.get("familyNotes") or payload.get("family_notes") or existing_profile.get("familyNotes", "")).strip(),
+        "isGroupReference": parse_bool(payload.get("isGroupReference") or payload.get("is_group_reference") or existing_profile.get("isGroupReference", False)),
+        "groupMembers": group_members,
         "seedImageUrl": seed_image_url,
         "thumbnailUrl": str(thumbnail_url or payload.get("thumbnailUrl") or payload.get("thumbnail_url") or existing_profile.get("thumbnailUrl", "")).strip(),
         "createdAt": existing_profile.get("createdAt") or payload.get("createdAt") or payload.get("created_at") or "",
@@ -183,6 +225,8 @@ def list_character_summaries() -> list[dict[str, Any]]:
                 "personality": profile.get("personality", ""),
                 "groupIdentity": profile.get("groupIdentity", ""),
                 "familyNotes": profile.get("familyNotes", ""),
+                "isGroupReference": profile.get("isGroupReference", False),
+                "groupMembers": profile.get("groupMembers", []),
                 "thumbnailUrl": profile.get("thumbnailUrl", ""),
                 "seedImageUrl": profile.get("seedImageUrl", ""),
                 "file": path.name,
@@ -198,23 +242,29 @@ def build_prompt(payload: dict[str, Any]) -> str:
     group_name = str(payload.get("group_name", "")).strip()
     character_profile = load_character_profile(character_name)
     group_profile = load_character_profile(group_name) if group_name else {}
+    group_members = parse_name_list(payload.get("group_members") or payload.get("groupMembers") or character_profile.get("groupMembers", []))
     visual_traits = str(payload.get("visual_traits", "")).strip() or str(character_profile.get("visualTraits", "")).strip()
     birth_state = str(payload.get("birth_state", "")).strip() or str(character_profile.get("birthState", "")).strip()
     distinctive_anatomy = str(payload.get("distinctive_anatomy", "")).strip() or str(character_profile.get("distinctiveAnatomy", "")).strip()
     expression_pose = str(payload.get("expression_pose", "")).strip() or str(character_profile.get("expressionPose", "")).strip()
     style_notes = str(payload.get("style_notes", "")).strip() or str(character_profile.get("styleNotes", "")).strip()
+    personality = str(payload.get("personality", "")).strip() or str(character_profile.get("personality", "")).strip()
+    group_identity = str(payload.get("group_identity", "")).strip() or str(character_profile.get("groupIdentity", "")).strip()
+    family_notes = str(payload.get("family_notes", "")).strip() or str(character_profile.get("familyNotes", "")).strip()
+    is_group_reference = parse_bool(payload.get("isGroupReference") or payload.get("is_group_reference") or character_profile.get("isGroupReference", False))
     cover_story_notes = str(payload.get("cover_story_notes", "")).strip()
     prompt_seed = str(payload.get("prompt_seed", "")).strip()
-    seed_image_present = bool(str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or "").strip())
 
     lines = [
-        f"Create the first canonical main character for the picture book '{project_title}'.",
+        f"Create a canonical character thumbnail for the picture book '{project_title}'.",
         f"Character name: {character_name}.",
         f"Role: {character_role}.",
-        "Make this a clean, reusable character reference PNG with a simple plain background.",
+        "Make this a clean, reusable character thumbnail that feels like the character as they would appear in the book illustrations.",
+        "Use a simple plain background and keep the figure clearly centered.",
         "Keep the whole body visible and the silhouette easy to recognize at a glance.",
         "Use the book's locked children's-book illustration style.",
         "Preserve the cover's visual language, mood, palette, texture, softness, and simplified shapes.",
+        "Do not copy the seed image composition or turn the thumbnail into a traced reference image.",
         "Do not drift toward photorealism or overly detailed rendering.",
     ]
 
@@ -228,18 +278,29 @@ def build_prompt(payload: dict[str, Any]) -> str:
         lines.append(f"Expression and pose: {expression_pose}.")
     if style_notes:
         lines.append(f"Style lock notes: {style_notes}.")
+    if personality:
+        lines.append(f"Personality: {personality}.")
+    if group_identity:
+        lines.append(f"Group identity: {group_identity}.")
+    if family_notes:
+        lines.append(f"Family notes: {family_notes}.")
     if group_name and group_profile:
         lines.append(f"Group name: {group_name}.")
         if group_profile.get("groupIdentity"):
             lines.append(f"Group identity: {group_profile.get('groupIdentity')}.")
         if group_profile.get("familyNotes"):
             lines.append(f"Family notes: {group_profile.get('familyNotes')}.")
+    if group_members:
+        lines.append(f"Group members: {', '.join(group_members)}.")
+    if is_group_reference or group_members:
+        lines.append("This is a group reference profile. Depict the listed members together as a cohesive group image, with each member clearly readable and distinguishable.")
+        if group_members:
+            lines.append(f"Group avatar members: {', '.join(group_members)}.")
+        lines.append("Do not collapse the group into one person; show the collection as the canonical avatar for the family or group.")
     if cover_story_notes:
         lines.append(f"Cover story notes: {cover_story_notes}.")
     if prompt_seed:
         lines.append(f"Prompt seed: {prompt_seed}.")
-    if seed_image_present:
-        lines.append("Use the uploaded seed image as the identity anchor for this character, then redraw it in the book's locked style.")
 
     lines.extend(
         [
@@ -250,6 +311,99 @@ def build_prompt(payload: dict[str, Any]) -> str:
     )
 
     return "\n".join(lines)
+
+
+def analyze_character_seed(payload: dict[str, Any]) -> dict[str, Any]:
+    character_name = str(payload.get("name") or payload.get("character_name") or "").strip()
+    role = str(payload.get("role") or payload.get("character_role") or "").strip()
+    seed_image_reference = str(payload.get("seed_image_data_url") or payload.get("seedImageDataUrl") or payload.get("seed_image_url") or payload.get("seedImageUrl") or "").strip()
+    if not seed_image_reference:
+        raise ValueError("A seed image is required for analysis.")
+
+    current_profile = load_character_profile(character_name) if character_name else {}
+    prompt_lines = [
+        "Analyze this character seed image for a children's picture book profile.",
+        "Return only a valid JSON object with these keys: name, role, visualTraits, birthState, distinctiveAnatomy, expressionPose, styleNotes, personality, groupIdentity, familyNotes.",
+        "Use the current character name and role as anchors if they are provided. Do not rename the character unless the name is empty.",
+        "Describe only what is visible or strongly implied by the image. Do not normalize unusual anatomy or disguise it into a different species or body type.",
+        "Keep each field concise, specific, and useful for a character profile editor.",
+        "If a field is unknown, return an empty string for it.",
+    ]
+    if character_name:
+        prompt_lines.append(f"Current name: {character_name}.")
+    if role:
+        prompt_lines.append(f"Current role: {role}.")
+    if current_profile.get("visualTraits"):
+        prompt_lines.append(f"Existing visual traits: {current_profile.get('visualTraits')}.")
+    if current_profile.get("styleNotes"):
+        prompt_lines.append(f"Existing style notes: {current_profile.get('styleNotes')}.")
+    if current_profile.get("personality"):
+        prompt_lines.append(f"Existing personality: {current_profile.get('personality')}.")
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    response = client.responses.create(
+        model=DEFAULT_MODEL,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "\n".join(prompt_lines),
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": resolve_image_reference(seed_image_reference),
+                        "detail": "high",
+                    },
+                ],
+            }
+        ],
+    )
+
+    response_text = getattr(response, "output_text", "") or ""
+    if not response_text and getattr(response, "output", None):
+        for item in response.output:
+            for content in getattr(item, "content", []) or []:
+                if getattr(content, "type", None) == "output_text":
+                    response_text += getattr(content, "text", "")
+    analysis = extract_json_object(response_text)
+
+    normalized = {
+        "name": str(analysis.get("name") or character_name or current_profile.get("name", "")).strip(),
+        "role": str(analysis.get("role") or role or current_profile.get("role", "")).strip(),
+        "visualTraits": str(analysis.get("visualTraits") or analysis.get("visual_traits") or "").strip(),
+        "birthState": str(analysis.get("birthState") or analysis.get("birth_state") or "").strip(),
+        "distinctiveAnatomy": str(analysis.get("distinctiveAnatomy") or analysis.get("distinctive_anatomy") or "").strip(),
+        "expressionPose": str(analysis.get("expressionPose") or analysis.get("expression_pose") or "").strip(),
+        "styleNotes": str(analysis.get("styleNotes") or analysis.get("style_notes") or "").strip(),
+        "personality": str(analysis.get("personality") or "").strip(),
+        "groupIdentity": str(analysis.get("groupIdentity") or analysis.get("group_identity") or "").strip(),
+        "familyNotes": str(analysis.get("familyNotes") or analysis.get("family_notes") or "").strip(),
+        "seedImageUrl": "",
+        "thumbnailUrl": "",
+    }
+
+    if not normalized["name"]:
+        normalized["name"] = character_name or current_profile.get("name", "") or "Untitled Character"
+    if not normalized["role"] and role:
+      normalized["role"] = role
+
+    if payload.get("save_profile") or payload.get("saveProfile"):
+        save_payload = dict(payload)
+        save_payload.update(normalized)
+        save_payload["seed_image_data_url"] = seed_image_reference if seed_image_reference.startswith("data:") else ""
+        save_payload["seed_image_url"] = seed_image_reference if not seed_image_reference.startswith("data:") else ""
+        normalized_profile = save_character_profile(save_payload)
+        return {
+            "analysis": normalized,
+            "character": normalized_profile,
+        }
+
+    return {
+        "analysis": normalized,
+        "character": normalized,
+    }
 
 
 def build_page_scene_prompt(payload: dict[str, Any]) -> str:
@@ -265,6 +419,7 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
     layout = str(payload.get("layout", "")).strip()
     print_size = str(payload.get("print_size", "")).strip()
     selected_characters = payload.get("characters", [])
+    provided_profiles = payload.get("character_profiles", [])
     scene_style = load_scene_style()
 
     if isinstance(selected_characters, str):
@@ -276,11 +431,49 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
     if not isinstance(selected_characters, list):
         selected_characters = []
 
-    profiles = []
-    for name in selected_characters:
-        profile = load_character_profile(str(name))
-        if profile:
-            profiles.append(profile)
+    profiles: list[dict[str, Any]] = []
+    seen_profiles: set[str] = set()
+
+    def profile_key(profile: dict[str, Any]) -> str:
+        return slugify(str(profile.get("name", "")).strip()) or str(profile.get("name", "")).strip().casefold()
+
+    def add_profile(profile: dict[str, Any]) -> None:
+        if not isinstance(profile, dict):
+            return
+        normalized_profile = {
+            "name": str(profile.get("name", "")).strip(),
+            "role": str(profile.get("role", "")).strip(),
+            "visualTraits": str(profile.get("visualTraits", "")).strip(),
+            "birthState": str(profile.get("birthState", "")).strip(),
+            "distinctiveAnatomy": str(profile.get("distinctiveAnatomy", "")).strip(),
+            "expressionPose": str(profile.get("expressionPose", "")).strip(),
+            "styleNotes": str(profile.get("styleNotes", "")).strip(),
+            "personality": str(profile.get("personality", "")).strip(),
+            "groupIdentity": str(profile.get("groupIdentity", "")).strip(),
+            "familyNotes": str(profile.get("familyNotes", "")).strip(),
+            "isGroupReference": parse_bool(profile.get("isGroupReference", False)),
+            "groupMembers": parse_name_list(profile.get("groupMembers", [])),
+        }
+        name_key = profile_key(normalized_profile)
+        if not normalized_profile["name"] or name_key in seen_profiles:
+            return
+        seen_profiles.add(name_key)
+        profiles.append(normalized_profile)
+        if normalized_profile["isGroupReference"]:
+            for member_name in normalized_profile["groupMembers"]:
+                member_profile = load_character_profile(member_name)
+                if member_profile:
+                    add_profile(member_profile)
+
+    if isinstance(provided_profiles, list):
+        for profile in provided_profiles:
+            add_profile(profile)
+
+    if not profiles:
+        for name in selected_characters:
+            profile = load_character_profile(str(name))
+            if profile:
+                add_profile(profile)
 
     page_label = f"page {page_number}" if page_number else "a picture book page"
     lines = [
@@ -290,6 +483,7 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
         "Style: warm soft hand-painted children's-book art, sunrise palette, gentle realism, readable shapes.",
         "Use the uploaded cover image as the primary style reference. Match its palette, mood, brushwork, lighting, and visual finish across the book.",
         "Keep character design consistent from page to page. Do not redesign the characters, and preserve their proportions, markings, species, and clothing or accessories.",
+        "If multiple characters are listed, every one of them must appear in the image and be visually readable.",
         "Avoid text, captions, watermarks, logos, borders, speech bubbles, and photorealism.",
     ]
 
@@ -320,17 +514,29 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
             lines.append(f"Print size: {size_label}.")
 
     if profiles:
+        lines.append(f"Characters required in this scene: {len(profiles)}.")
+        lines.append("All listed characters must appear clearly and be recognizable. Do not omit any of them.")
         lines.append("Characters:")
         for profile in profiles:
             character_lines = [
                 f"- {profile.get('name', 'Unnamed character')}: {profile.get('role', 'character')}",
             ]
+            if profile.get("isGroupReference"):
+                member_list = ", ".join(parse_name_list(profile.get("groupMembers", [])))
+                if member_list:
+                    character_lines.append(f"group reference for: {member_list}")
             if profile.get("visualTraits"):
                 character_lines.append(f"visual traits: {profile.get('visualTraits')}")
+            if profile.get("birthState"):
+                character_lines.append(f"birth state: {profile.get('birthState')}")
             if profile.get("distinctiveAnatomy"):
                 character_lines.append(f"distinctive anatomy: {profile.get('distinctiveAnatomy')}")
             if profile.get("personality"):
                 character_lines.append(f"personality: {profile.get('personality')}")
+            if profile.get("groupIdentity"):
+                character_lines.append(f"group identity: {profile.get('groupIdentity')}")
+            if profile.get("familyNotes"):
+                character_lines.append(f"family notes: {profile.get('familyNotes')}")
             lines.append("; ".join(character_lines) + ".")
 
     lines.extend(
@@ -594,6 +800,9 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/generate-character":
             self.handle_generate_character()
             return
+        if parsed.path == "/api/analyze-character-seed":
+            self.handle_analyze_character_seed()
+            return
         if parsed.path == "/api/generate-page-scene":
             self.handle_generate_page_scene()
             return
@@ -670,6 +879,28 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {
                     "error": f"OpenAI image generation failed: {exc}",
+                },
+            )
+
+    def handle_analyze_character_seed(self) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(content_length)
+            payload = json.loads(body.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"Invalid JSON payload: {exc}"},
+            )
+            return
+
+        try:
+            self.send_json(HTTPStatus.OK, analyze_character_seed(payload))
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {
+                    "error": f"Character seed analysis failed: {exc}",
                 },
             )
 

@@ -37,6 +37,12 @@ const makeId = () => {
   return `id-${Date.now().toString(36)}-${random}`;
 };
 
+function parseBool(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  return ["true", "1", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 const refs = {
   bookSelect: $("#bookSelect"),
   newBookButton: $("#newBookButton"),
@@ -93,6 +99,8 @@ const refs = {
   characterEditorStatus: $("#characterEditorStatus"),
   characterEditorName: $("#characterEditorName"),
   characterEditorRole: $("#characterEditorRole"),
+  characterEditorIsGroupReference: $("#characterEditorIsGroupReference"),
+  characterEditorGroupMembers: $("#characterEditorGroupMembers"),
   characterEditorVisualTraits: $("#characterEditorVisualTraits"),
   characterEditorBirthState: $("#characterEditorBirthState"),
   characterEditorDistinctiveAnatomy: $("#characterEditorDistinctiveAnatomy"),
@@ -105,6 +113,7 @@ const refs = {
   seedCharacterButton: $("#seedCharacterButton"),
   saveCharacterButton: $("#saveCharacterButton"),
   generateCharacterThumbnailButton: $("#generateCharacterThumbnailButton"),
+  analyzeCharacterSeedButton: $("#analyzeCharacterSeedButton"),
   useCharacterOnPageButton: $("#useCharacterOnPageButton"),
   characterSeedInput: $("#characterSeedInput"),
   fullBookPreview: $("#fullBookPreview"),
@@ -216,6 +225,7 @@ let activeCharacterName = "";
 let characterDraft = null;
 let characterEditorOpen = false;
 let characterThumbnailGenerating = false;
+let characterSeedAnalyzing = false;
 
 function normalizeLoadedState(parsed) {
   const fallback = defaultState();
@@ -945,23 +955,26 @@ function setGenerating(isGenerating, pageId = "") {
   renderBookPreview();
 }
 
-function setThumbnailButtonLoading(isLoading) {
-  const button = refs.generateCharacterThumbnailButton;
+function setThumbnailButtonLoading(
+  isLoading,
+  button = refs.generateCharacterThumbnailButton,
+  loadingLabel = "Generating thumbnail...",
+  idleLabel = "",
+) {
   if (!button) return;
-  if (!button.dataset.defaultLabel) {
+  if (!idleLabel && !button.dataset.defaultLabel) {
     button.dataset.defaultLabel = button.textContent || "Generate thumbnail";
   }
   if (isLoading) {
     button.disabled = true;
     button.classList.add("is-loading");
-    button.innerHTML = `
-      <span class="button-loading-icon" aria-hidden="true"></span>
-      <span>${escapeHtml("Generating...")}</span>
-    `;
+    button.textContent = loadingLabel;
+    button.setAttribute("aria-busy", "true");
   } else {
     button.classList.remove("is-loading");
     button.disabled = !characterDraft?.name?.trim();
-    button.textContent = button.dataset.defaultLabel || "Generate thumbnail";
+    button.textContent = idleLabel || button.dataset.defaultLabel || "Generate thumbnail";
+    button.removeAttribute("aria-busy");
   }
 }
 
@@ -1108,6 +1121,13 @@ function normalizeCharacterRecord(character = {}) {
   return {
     name: String(character.name || "").trim(),
     role: String(character.role || character.characterRole || "").trim(),
+    isGroupReference: parseBool(character.isGroupReference ?? character.is_group_reference),
+    groupMembers: Array.isArray(character.groupMembers)
+      ? character.groupMembers.map((item) => String(item).trim()).filter(Boolean)
+      : String(character.groupMembers || character.group_members || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
     visualTraits: String(character.visualTraits || character.visual_traits || "").trim(),
     birthState: String(character.birthState || character.birth_state || "").trim(),
     distinctiveAnatomy: String(character.distinctiveAnatomy || character.distinctive_anatomy || "").trim(),
@@ -1127,6 +1147,8 @@ function blankCharacterDraft() {
     originalName: "",
     name: "",
     role: "",
+    isGroupReference: false,
+    groupMembers: [],
     visualTraits: "",
     birthState: "",
     distinctiveAnatomy: "",
@@ -1162,6 +1184,8 @@ function setCharacterDraftFromRecord(character, { isNew = false } = {}) {
     originalName: normalized.name,
     name: normalized.name,
     role: normalized.role,
+    isGroupReference: normalized.isGroupReference,
+    groupMembers: normalized.groupMembers,
     visualTraits: normalized.visualTraits,
     birthState: normalized.birthState,
     distinctiveAnatomy: normalized.distinctiveAnatomy,
@@ -1234,6 +1258,8 @@ function renderCharacterEditor() {
   if (!shouldShow) return;
   refs.characterEditorName.value = draft.name || "";
   refs.characterEditorRole.value = draft.role || "";
+  if (refs.characterEditorIsGroupReference) refs.characterEditorIsGroupReference.checked = Boolean(draft.isGroupReference);
+  if (refs.characterEditorGroupMembers) refs.characterEditorGroupMembers.value = Array.isArray(draft.groupMembers) ? draft.groupMembers.join(", ") : "";
   refs.characterEditorVisualTraits.value = draft.visualTraits || "";
   if (refs.characterEditorBirthState) refs.characterEditorBirthState.value = draft.birthState || "";
   refs.characterEditorDistinctiveAnatomy.value = draft.distinctiveAnatomy || "";
@@ -1255,7 +1281,9 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
   refs.characterEditor.classList.toggle("is-empty", !draft.name);
   refs.characterEditorTitle.textContent = draft.name || "Select a character";
   refs.characterEditorSummary.textContent = draft.name
-    ? "Tweak the cast profile, then save it for the whole studio."
+    ? draft.isGroupReference
+      ? `Group reference profile${Array.isArray(draft.groupMembers) && draft.groupMembers.length ? ` for ${draft.groupMembers.join(", ")}` : ""}. Tweak the canonical group profile, then save it for the whole studio.`
+      : "Tweak the cast profile, then save it for the whole studio."
     : "Choose a cast member to tweak their visual notes, or start a new one from a seed image.";
   refs.characterEditorStatus.textContent = draft.seedImageFileName
     ? `Seed image loaded: ${draft.seedImageFileName}`
@@ -1263,6 +1291,8 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
     ? "Seed image already attached to this profile."
     : draft.thumbnailUrl
     ? "Thumbnail already generated for this character."
+    : draft.isGroupReference && Array.isArray(draft.groupMembers) && draft.groupMembers.length
+    ? `Group reference for: ${draft.groupMembers.join(", ")}.`
     : "No thumbnail yet.";
 
   refs.characterEditorThumbnail.innerHTML = previewUrl
@@ -1278,11 +1308,13 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
   }
   if (refs.generateCharacterThumbnailButton) {
     refs.generateCharacterThumbnailButton.disabled = !draft.name.trim();
-    if (characterThumbnailGenerating) {
-      setThumbnailButtonLoading(true);
-    } else {
-      setThumbnailButtonLoading(false);
-    }
+    setThumbnailButtonLoading(characterThumbnailGenerating, refs.generateCharacterThumbnailButton, "Generating character...", "Generate Character");
+  }
+  if (refs.analyzeCharacterSeedButton) {
+    const hasSeed = Boolean(draft.seedImageDataUrl || draft.seedImageUrl);
+    refs.analyzeCharacterSeedButton.disabled = Boolean(characterSeedAnalyzing);
+    const idleLabel = hasSeed ? "Analyze seed" : "Upload seed image";
+    setThumbnailButtonLoading(characterSeedAnalyzing, refs.analyzeCharacterSeedButton, hasSeed ? "Analyzing seed..." : "Uploading seed...", idleLabel);
   }
 }
 
@@ -1583,6 +1615,21 @@ async function generatePageForId(pageId) {
     layout: page.layout,
     print_size: book.printSize,
     characters: splitNames(page.characters),
+    character_profiles: splitNames(page.characters)
+      .map((name) => state.characters.find((character) => character.name === name))
+      .filter(Boolean)
+      .map((character) => ({
+        name: character.name,
+        role: character.role,
+        visualTraits: character.visualTraits,
+        birthState: character.birthState,
+        distinctiveAnatomy: character.distinctiveAnatomy,
+        expressionPose: character.expressionPose,
+        styleNotes: character.styleNotes,
+        personality: character.personality,
+        groupIdentity: character.groupIdentity,
+        familyNotes: character.familyNotes,
+      })),
     cover_data_url: book.coverReferenceUrl || book.coverPreviewUrl || "",
   };
 
@@ -1727,6 +1774,8 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     original_name: draft.originalName || "",
     name,
     role: draft.role || "",
+    isGroupReference: Boolean(draft.isGroupReference),
+    groupMembers: Array.isArray(draft.groupMembers) ? draft.groupMembers : splitNames(String(draft.groupMembers || "")),
     visualTraits: draft.visualTraits || "",
     birthState: draft.birthState || "",
     distinctiveAnatomy: draft.distinctiveAnatomy || "",
@@ -1744,6 +1793,8 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     payload.project_title = book.projectTitle || "Untitled book";
     payload.character_name = name;
     payload.character_role = draft.role || "";
+    payload.isGroupReference = Boolean(draft.isGroupReference);
+    payload.groupMembers = Array.isArray(draft.groupMembers) ? draft.groupMembers : splitNames(String(draft.groupMembers || ""));
     payload.visual_traits = draft.visualTraits || "";
     payload.birth_state = draft.birthState || "";
     payload.distinctive_anatomy = draft.distinctiveAnatomy || "";
@@ -1753,11 +1804,10 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     payload.group_identity = draft.groupIdentity || "";
     payload.family_notes = draft.familyNotes || "";
     payload.cover_data_url = book.coverReferenceUrl || book.coverPreviewUrl || "";
-    payload.seed_image_data_url = draft.seedImageDataUrl || draft.seedImageUrl || "";
 
     characterThumbnailGenerating = true;
     setThumbnailButtonLoading(true);
-    setStatus("Generating thumbnail", `Creating a character thumbnail for ${name}.`);
+    setStatus("Generating character", `Creating a canonical avatar for ${name}.`);
     try {
       const response = await fetch("/api/generate-character", {
         method: "POST",
@@ -1766,7 +1816,7 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
       });
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || "Character thumbnail generation failed.");
+        throw new Error(result.error || "Character generation failed.");
       }
       characterDraft.thumbnailUrl = result.file_url || "";
       characterDraft.seedImageUrl = result.seedImageUrl || characterDraft.seedImageUrl;
@@ -1775,7 +1825,7 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
       characterDraft.originalName = name;
       characterDraft.isNew = false;
       activeCharacterName = name;
-      setStatus("Thumbnail ready", `${name} now has a styled character thumbnail.`);
+      setStatus("Character ready", `${name} now has a styled character avatar.`);
     } finally {
       characterThumbnailGenerating = false;
       setThumbnailButtonLoading(false);
@@ -1796,6 +1846,8 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     if (result.character) {
       characterDraft.thumbnailUrl = result.character.thumbnailUrl || characterDraft.thumbnailUrl;
       characterDraft.seedImageUrl = result.character.seedImageUrl || characterDraft.seedImageUrl;
+      characterDraft.isGroupReference = Boolean(result.character.isGroupReference);
+      characterDraft.groupMembers = Array.isArray(result.character.groupMembers) ? result.character.groupMembers : splitNames(String(result.character.groupMembers || ""));
     }
     activeCharacterName = name;
     setStatus("Character saved", `${name} is now available for this book.`);
@@ -1805,14 +1857,16 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
   await loadCharacters();
   const refreshed = state.characters.find((character) => character.name === name);
   if (refreshed) {
-    characterDraft = {
-      ...blankCharacterDraft(),
-      ...refreshed,
-      originalName: refreshed.name,
-      name: refreshed.name,
-      role: refreshed.role,
-      visualTraits: refreshed.visualTraits,
-      birthState: refreshed.birthState,
+      characterDraft = {
+        ...blankCharacterDraft(),
+        ...refreshed,
+        originalName: refreshed.name,
+        name: refreshed.name,
+        role: refreshed.role,
+        isGroupReference: refreshed.isGroupReference,
+        groupMembers: refreshed.groupMembers,
+        visualTraits: refreshed.visualTraits,
+        birthState: refreshed.birthState,
       distinctiveAnatomy: refreshed.distinctiveAnatomy,
       expressionPose: refreshed.expressionPose,
       styleNotes: refreshed.styleNotes,
@@ -1829,6 +1883,81 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
   renderCharacterEditor();
 }
 
+async function analyzeCharacterSeed({ saveAfterAnalysis = false } = {}) {
+  const draft = characterDraft || blankCharacterDraft();
+  const seedImageDataUrl = draft.seedImageDataUrl || "";
+  const seedImageUrl = draft.seedImageUrl || "";
+  const seedReference = seedImageDataUrl || seedImageUrl;
+  if (!seedReference) {
+    setStatus("Missing seed image", "Attach a seed image before analyzing the character.");
+    return;
+  }
+
+  const name = draft.name.trim();
+  const payload = {
+    name,
+    role: draft.role || "",
+    visualTraits: draft.visualTraits || "",
+    birthState: draft.birthState || "",
+    distinctiveAnatomy: draft.distinctiveAnatomy || "",
+    expressionPose: draft.expressionPose || "",
+    styleNotes: draft.styleNotes || "",
+    personality: draft.personality || "",
+    groupIdentity: draft.groupIdentity || "",
+    familyNotes: draft.familyNotes || "",
+    seed_image_data_url: seedImageDataUrl,
+    seed_image_url: seedImageUrl,
+    save_profile: Boolean(saveAfterAnalysis && name),
+  };
+
+  characterSeedAnalyzing = true;
+  setThumbnailButtonLoading(true, refs.analyzeCharacterSeedButton, "Analyzing seed...");
+  setStatus("Analyzing seed image", "Reading the seed image and filling the character profile.");
+  try {
+    const response = await fetch("/api/analyze-character-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Character seed analysis failed.");
+    }
+
+    const analysis = result.character || result.analysis || {};
+    characterDraft = {
+      ...(characterDraft || blankCharacterDraft()),
+      originalName: characterDraft?.originalName || analysis.name || draft.originalName || "",
+      name: name || analysis.name || draft.name || "",
+      role: draft.role || analysis.role || "",
+      visualTraits: analysis.visualTraits || draft.visualTraits || "",
+      birthState: analysis.birthState || draft.birthState || "",
+      distinctiveAnatomy: analysis.distinctiveAnatomy || draft.distinctiveAnatomy || "",
+      expressionPose: analysis.expressionPose || draft.expressionPose || "",
+      styleNotes: analysis.styleNotes || draft.styleNotes || "",
+      personality: analysis.personality || draft.personality || "",
+      groupIdentity: analysis.groupIdentity || draft.groupIdentity || "",
+      familyNotes: analysis.familyNotes || draft.familyNotes || "",
+      thumbnailUrl: analysis.thumbnailUrl || draft.thumbnailUrl || "",
+      seedImageUrl: analysis.seedImageUrl || seedImageUrl || "",
+      seedImageDataUrl,
+      seedImageFileName: draft.seedImageFileName || "",
+      isNew: draft.isNew,
+    };
+    activeCharacterName = characterDraft.name.trim() || activeCharacterName;
+    await loadCharacters();
+    renderCharacterEditor();
+    if (saveAfterAnalysis && characterDraft.name.trim()) {
+      setStatus("Seed analyzed", "The character profile was updated from the seed image.");
+    } else {
+      setStatus("Seed analyzed", "The character fields were updated from the seed image.");
+    }
+  } finally {
+    characterSeedAnalyzing = false;
+    setThumbnailButtonLoading(false, refs.analyzeCharacterSeedButton, "Analyzing seed...");
+  }
+}
+
 async function setCharacterSeedFromFile(file) {
   const dataUrl = await resizeFileToDataUrl(file, 1024, 0.9);
   if (!characterDraft) {
@@ -1837,6 +1966,7 @@ async function setCharacterSeedFromFile(file) {
   characterDraft.seedImageDataUrl = dataUrl;
   characterDraft.seedImageFileName = file.name;
   renderCharacterEditor();
+  await analyzeCharacterSeed({ saveAfterAnalysis: Boolean(characterDraft?.name?.trim()) });
 }
 
 function appendCharacter(name) {
@@ -2414,12 +2544,27 @@ refs.characterEditor.addEventListener("input", (event) => {
     characterEditorPersonality: "personality",
     characterEditorGroupIdentity: "groupIdentity",
     characterEditorFamilyNotes: "familyNotes",
+    characterEditorGroupMembers: "groupMembers",
   };
   const key = map[event.target.id];
   if (!key) return;
-  characterDraft[key] = event.target.value;
+  if (key === "groupMembers") {
+    characterDraft.groupMembers = splitNames(event.target.value);
+  } else {
+    characterDraft[key] = event.target.value;
+  }
   if (key === "name") {
     activeCharacterName = event.target.value.trim();
+  }
+  syncCharacterEditorChrome(characterDraft.seedImageDataUrl || characterDraft.thumbnailUrl || characterDraft.seedImageUrl || "");
+});
+
+refs.characterEditor.addEventListener("change", (event) => {
+  if (event.target.id !== "characterEditorIsGroupReference") return;
+  if (!characterDraft) characterDraft = blankCharacterDraft();
+  characterDraft.isGroupReference = Boolean(event.target.checked);
+  if (!characterDraft.isGroupReference) {
+    characterDraft.groupMembers = Array.isArray(characterDraft.groupMembers) ? characterDraft.groupMembers : splitNames(String(characterDraft.groupMembers || ""));
   }
   syncCharacterEditorChrome(characterDraft.seedImageDataUrl || characterDraft.thumbnailUrl || characterDraft.seedImageUrl || "");
 });
@@ -2449,7 +2594,21 @@ refs.generateCharacterThumbnailButton.addEventListener("click", async () => {
   try {
     await saveCharacterDraft({ generateThumbnail: true });
   } catch (error) {
-    setStatus("Thumbnail generation failed", error.message || "Could not generate the character thumbnail.");
+      setStatus("Character generation failed", error.message || "Could not generate the character avatar.");
+  }
+});
+
+refs.analyzeCharacterSeedButton.addEventListener("click", async () => {
+  try {
+    const draft = characterDraft || blankCharacterDraft();
+    const hasSeed = Boolean(draft.seedImageDataUrl || draft.seedImageUrl);
+    if (!hasSeed) {
+      refs.characterSeedInput?.click();
+      return;
+    }
+    await analyzeCharacterSeed({ saveAfterAnalysis: Boolean(characterDraft?.name?.trim()) });
+  } catch (error) {
+    setStatus("Seed analysis failed", error.message || "Could not analyze the seed image.");
   }
 });
 

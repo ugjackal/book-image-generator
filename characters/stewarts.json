@@ -1,10 +1,21 @@
 {
   "name": "The Stewarts",
   "role": "Recurring family pair",
-  "members": ["Kim", "Tony"],
-  "groupIdentity": "When Kim and Tony appear together, they are called the Stewarts.",
   "visualTraits": "A paired adult family presence with a warm, grounded, dependable feel and a consistent storybook look.",
-  "familyNotes": "Kim is the mother of three and Tony is the father of three. Together they should read as a cohesive couple.",
+  "birthState": "",
+  "distinctiveAnatomy": "",
   "expressionPose": "Supportive, calm, and unified, with body language that clearly shows they belong together.",
-  "styleNotes": "Keep the Stewarts in the book's locked style: soft hand-painted children's-book illustration, warm palette, painterly brush texture, gentle storybook realism, simplified readable shapes, and no photorealism."
+  "styleNotes": "Keep the Stewarts in the book's locked style: soft hand-painted children's-book illustration, warm palette, painterly brush texture, gentle storybook realism, simplified readable shapes, and no photorealism.",
+  "personality": "",
+  "groupIdentity": "",
+  "familyNotes": "",
+  "isGroupReference": true,
+  "groupMembers": [
+    "Kim",
+    "Tony"
+  ],
+  "seedImageUrl": "",
+  "thumbnailUrl": "/outputs/the-stewarts-d45937a1.png",
+  "createdAt": "2026-05-08T21:36:36.649994+00:00",
+  "updatedAt": "2026-05-09T01:55:23.314885+00:00"
 }

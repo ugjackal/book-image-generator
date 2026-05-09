@@ -68,6 +68,7 @@ const refs = {
   addAuthorButton: $("#addAuthorButton"),
   printSizeSelect: $("#printSizeSelect"),
   printSizeToolbar: $("#printSizeToolbar"),
+  backCoverSummary: $("#backCoverSummary"),
   audienceSelect: $("#audienceSelect"),
   suggestedPageCount: $("#suggestedPageCount"),
   storyManuscript: $("#storyManuscript"),
@@ -160,6 +161,7 @@ const defaultBook = (title = "Untitled Book") => {
     coverFileName: "",
     coverPreviewUrl: "",
     coverReferenceUrl: "",
+    backCoverSummary: "",
     audience: "3-8",
     suggestedPageCount: "",
     manuscript: "",
@@ -209,6 +211,7 @@ const legacyBookFromState = (parsed) => ({
   coverFileName: parsed.coverFileName || "",
   coverPreviewUrl: parsed.coverPreviewUrl || "",
   coverReferenceUrl: parsed.coverReferenceUrl || "",
+  backCoverSummary: parsed.backCoverSummary || "",
   audience: parsed.audience || "3-8",
   suggestedPageCount: parsed.suggestedPageCount || "",
   manuscript: parsed.manuscript || "",
@@ -1037,6 +1040,7 @@ function render() {
   refs.newAuthorName.value = "";
   refs.printSizeSelect.value = normalizePrintSize(book.printSize);
   refs.printSizeToolbar.innerHTML = renderPrintSizeToolbar(book.printSize);
+  refs.backCoverSummary.value = book.backCoverSummary || "";
   refs.audienceSelect.value = book.audience || "3-8";
   refs.suggestedPageCount.value = book.suggestedPageCount || "";
   refs.storyManuscript.value = book.manuscript || "";
@@ -1879,12 +1883,12 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
         throw new Error(result.error || "Character generation failed.");
       }
       characterDraft.thumbnailUrl = result.file_url || "";
-      characterDraft.seedImageUrl = result.seedImageUrl || characterDraft.seedImageUrl;
       characterDraft.seedImageDataUrl = "";
       characterDraft.seedImageFileName = "";
       characterDraft.originalName = name;
       characterDraft.isNew = false;
       activeCharacterName = name;
+      syncCharacterEditorChrome(characterDraft.thumbnailUrl, characterDraft);
       setStatus("Character ready", `${name} now has a styled character avatar.`);
     } finally {
       characterThumbnailGenerating = false;
@@ -1914,19 +1918,24 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
   }
 
   characterDraft.name = name;
+  if (generateThumbnail) {
+    characterDraft.thumbnailUrl = characterDraft.thumbnailUrl || "";
+    characterDraft.seedImageDataUrl = "";
+    syncCharacterEditorChrome(characterDraft.thumbnailUrl, characterDraft);
+  }
   await loadCharacters();
   const refreshed = state.characters.find((character) => character.name === name);
   if (refreshed) {
-      characterDraft = {
-        ...blankCharacterDraft(),
-        ...refreshed,
-        originalName: refreshed.name,
-        name: refreshed.name,
-        role: refreshed.role,
-        isGroupReference: refreshed.isGroupReference,
-        groupMembers: refreshed.groupMembers,
-        visualTraits: refreshed.visualTraits,
-        birthState: refreshed.birthState,
+    characterDraft = {
+      ...blankCharacterDraft(),
+      ...refreshed,
+      originalName: refreshed.name,
+      name: refreshed.name,
+      role: refreshed.role,
+      isGroupReference: refreshed.isGroupReference,
+      groupMembers: refreshed.groupMembers,
+      visualTraits: refreshed.visualTraits,
+      birthState: refreshed.birthState,
       distinctiveAnatomy: refreshed.distinctiveAnatomy,
       expressionPose: refreshed.expressionPose,
       styleNotes: refreshed.styleNotes,
@@ -2377,6 +2386,12 @@ refs.printSizeToolbar.addEventListener("click", (event) => {
   touchActiveBook();
   saveState();
   render();
+});
+
+refs.backCoverSummary.addEventListener("input", (event) => {
+  activeBook().backCoverSummary = event.target.value;
+  touchActiveBook();
+  saveState();
 });
 
 refs.suggestedPageCount.addEventListener("input", (event) => {

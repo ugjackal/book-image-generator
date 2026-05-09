@@ -7,6 +7,7 @@ import secrets
 import sys
 import mimetypes
 import threading
+from datetime import datetime
 from io import BytesIO
 from functools import partial
 from http import HTTPStatus
@@ -261,6 +262,13 @@ def build_prompt(payload: dict[str, Any]) -> str:
     is_group_reference = parse_bool(payload.get("isGroupReference") or payload.get("is_group_reference") or character_profile.get("isGroupReference", False))
     cover_story_notes = str(payload.get("cover_story_notes", "")).strip()
     prompt_seed = str(payload.get("prompt_seed", "")).strip()
+    seed_image_reference = str(
+        payload.get("seed_image_data_url")
+        or payload.get("seedImageDataUrl")
+        or payload.get("seed_image_url")
+        or payload.get("seedImageUrl")
+        or ""
+    ).strip()
 
     lines = [
         f"Create a canonical character thumbnail for the picture book '{project_title}'.",
@@ -308,6 +316,8 @@ def build_prompt(payload: dict[str, Any]) -> str:
         lines.append(f"Cover story notes: {cover_story_notes}.")
     if prompt_seed:
         lines.append(f"Prompt seed: {prompt_seed}.")
+    if seed_image_reference:
+        lines.append("Seed image reference: use the attached seed image as the primary visual anchor for identity, anatomy, proportions, silhouette, markings, and pose tendencies. Keep it recognizable while still converting it into the book's locked art style.")
 
     lines.extend(
         [
@@ -725,6 +735,9 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
         "authorName": str(book.get("authorName", "")).strip(),
         "printSize": str(book.get("printSize", "")).strip(),
         "audience": str(book.get("audience", "")).strip(),
+        "backCoverSummary": str(book.get("backCoverSummary", "")).strip(),
+        "coverPreviewUrl": str(book.get("coverPreviewUrl", "")).strip(),
+        "coverReferenceUrl": str(book.get("coverReferenceUrl", "")).strip(),
         "pages": normalized_pages,
     }
 
@@ -896,6 +909,147 @@ def draw_placeholder(canvas: Image.Image, box: tuple[int, int, int, int], label:
     )
 
 
+def draw_centered_text_block(
+    canvas: Image.Image,
+    text: str,
+    box: tuple[int, int, int, int],
+    *,
+    font_key: str = "storybook-serif",
+    start_size: int = 42,
+    min_size: int = 18,
+    fill: tuple[int, int, int, int] = (58, 42, 31, 255),
+    align: str = "center",
+) -> int:
+    draw = ImageDraw.Draw(canvas)
+    left, top, right, bottom = box
+    font, lines, spacing, total_height = fit_text_font(
+        draw,
+        text,
+        font_key,
+        max_width=max(1, right - left),
+        max_height=max(1, bottom - top),
+        start_size=start_size,
+        min_size=min_size,
+    )
+    _, block_height = text_block_metrics(draw, lines, font, spacing)
+    y = top + max(0, int(((bottom - top) - block_height) / 2))
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line or " ", font=font)
+        line_width = bbox[2] - bbox[0]
+        if align == "left":
+            x = left
+        elif align == "right":
+            x = right - line_width
+        else:
+            x = left + int(((right - left) - line_width) / 2)
+        draw.text((x, y), line, font=font, fill=fill)
+        y += (bbox[3] - bbox[1]) + spacing
+    return total_height
+
+
+def render_cover_page(book: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    canvas = Image.new("RGBA", (page_w, page_h), (250, 242, 232, 255))
+    cover_reference = str(book.get("coverPreviewUrl") or book.get("coverReferenceUrl") or "").strip()
+    cover_image = open_image_reference(cover_reference)
+
+    if cover_image is not None:
+        paste_fitted_image(canvas, cover_image, (0, 0, page_w, page_h), scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
+    else:
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle((0, 0, page_w, page_h), fill=(250, 242, 232, 255))
+        draw_centered_text_block(canvas, book.get("projectTitle", "Untitled Book"), (40, int(page_h * 0.18), page_w - 40, int(page_h * 0.48)), start_size=56)
+
+    overlay = Image.new("RGBA", (page_w, page_h), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    panel_w = min(page_w - 80, max(360, int(page_w * 0.62)))
+    panel_h = max(190, int(page_h * 0.23))
+    panel_x = int((page_w - panel_w) / 2)
+    panel_y = int(page_h * 0.12)
+    overlay_draw.rounded_rectangle(
+        (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
+        radius=24,
+        fill=(255, 252, 248, 210),
+        outline=(233, 211, 192, 220),
+        width=1,
+    )
+    title_box = (panel_x + 28, panel_y + 18, panel_x + panel_w - 28, panel_y + int(panel_h * 0.66))
+    author_box = (panel_x + 28, panel_y + int(panel_h * 0.66), panel_x + panel_w - 28, panel_y + panel_h - 20)
+    draw_centered_text_block(overlay, str(book.get("projectTitle") or "Untitled Book"), title_box, start_size=56, min_size=26, fill=(58, 42, 31, 255))
+    author_name = str(book.get("authorName") or "").strip()
+    if author_name:
+        draw_centered_text_block(overlay, author_name, author_box, start_size=28, min_size=18, fill=(132, 103, 77, 255))
+    canvas.alpha_composite(overlay)
+    return canvas.convert("RGB")
+
+
+def render_copyright_page(book: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
+    draw = ImageDraw.Draw(canvas)
+    margin_x = max(50, int(page_w * 0.12))
+    margin_y = max(48, int(page_h * 0.12))
+    draw.rounded_rectangle(
+        (margin_x, margin_y, page_w - margin_x, page_h - margin_y),
+        radius=22,
+        fill=(255, 252, 248, 255),
+        outline=(231, 215, 200, 255),
+        width=1,
+    )
+    title = str(book.get("projectTitle") or "Untitled Book").strip()
+    author = str(book.get("authorName") or "").strip()
+    copyright_year = str(book.get("copyrightYear") or "").strip() or str(datetime.now().year)
+    lines = [title]
+    if author:
+        lines.append(f"by {author}")
+    lines.extend(
+        [
+            "",
+            f"Copyright {copyright_year} {author or 'Unknown Author'}",
+            "All rights reserved.",
+            "",
+            "This book was created with Whoka Story Studio.",
+        ]
+    )
+    box = (margin_x + 28, margin_y + 26, page_w - margin_x - 28, page_h - margin_y - 26)
+    draw_centered_text_block(canvas, "\n".join(lines), box, start_size=30, min_size=18, fill=(58, 42, 31, 255))
+    return canvas.convert("RGB")
+
+
+def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    canvas = Image.new("RGBA", (page_w, page_h), (250, 242, 232, 255))
+    cover_reference = str(book.get("coverPreviewUrl") or book.get("coverReferenceUrl") or "").strip()
+    cover_image = open_image_reference(cover_reference)
+    if cover_image is not None:
+        paste_fitted_image(canvas, cover_image, (0, 0, page_w, page_h), scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
+    overlay = Image.new("RGBA", (page_w, page_h), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    panel_w = max(340, int(page_w * 0.72))
+    panel_h = max(220, int(page_h * 0.44))
+    panel_x = int((page_w - panel_w) / 2)
+    panel_y = int((page_h - panel_h) / 2)
+    overlay_draw.rounded_rectangle(
+        (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
+        radius=24,
+        fill=(255, 252, 248, 220),
+        outline=(233, 211, 192, 230),
+        width=1,
+    )
+    summary = str(book.get("backCoverSummary") or "").strip()
+    if not summary:
+        summary = "A warm picture-book story brought to life in Whoka Story Studio."
+    draw_centered_text_block(overlay, summary, (panel_x + 28, panel_y + 22, panel_x + panel_w - 28, panel_y + panel_h - 22), start_size=34, min_size=18, fill=(58, 42, 31, 255))
+    canvas.alpha_composite(overlay)
+    return canvas.convert("RGB")
+
+
 def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
@@ -1055,8 +1209,11 @@ def publish_book_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     file_path = BOOK_OUTPUT_DIR / file_name
 
     rendered_pages: list[Image.Image] = []
+    rendered_pages.append(render_cover_page(book))
+    rendered_pages.append(render_copyright_page(book))
     for page in pages:
         rendered_pages.append(render_pdf_page(book, page))
+    rendered_pages.append(render_back_cover_page(book))
 
     first, *rest = rendered_pages
     first.save(file_path, save_all=True, append_images=rest, format="PDF", resolution=300.0)
@@ -1168,7 +1325,6 @@ def generate_character_image(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if payload.get("save_profile") or payload.get("saveProfile"):
         profile_payload = dict(payload)
-        profile_payload["seed_image_data_url"] = seed_image_data_url
         save_character_profile(profile_payload, thumbnail_url=result["file_url"])
     result.update(
         {

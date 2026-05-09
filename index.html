@@ -147,6 +147,11 @@
             </div>
 
             <button class="ghost-button full-width" id="clearCoverButton" type="button">Clear cover</button>
+
+            <label class="field">
+              <span>Back cover summary</span>
+              <textarea id="backCoverSummary" rows="5" placeholder="Write the short summary that should appear on the back of the book."></textarea>
+            </label>
           </section>
 
           <section class="stack page-list-section">
@@ -250,19 +255,6 @@
                 <input id="composition" type="text" placeholder="Landscape picture-book page, full bodies visible..." />
               </label>
 
-              <label class="field span-2" hidden>
-                <span>Layout</span>
-                <select id="pageLayout">
-                  <option value="stacked-image-top">Image top, text bottom</option>
-                  <option value="stacked-text-top">Text top, image bottom</option>
-                  <option value="spread-text-left">Text left, image right</option>
-                  <option value="spread-image-left">Image left, text right</option>
-                  <option value="overlay-centered">Background image, centered text</option>
-                  <option value="overlay-top">Background image, top text</option>
-                  <option value="overlay-bottom">Background image, bottom text</option>
-                </select>
-              </label>
-
             </form>            
 
             <label class="field">
@@ -277,7 +269,7 @@
             <div class="section-head compact">
               <div>
                 <p class="eyebrow">Cast</p>
-                <h2>Available characters</h2>
+                <h2>Extra characters</h2>
               </div>
               <div class="character-card-actions">
                 <button class="ghost-button" id="newCharacterButton" type="button">New character</button>
@@ -291,7 +283,7 @@
                 <div class="character-editor-copy">
                   <p class="eyebrow">Selected character</p>
                   <h3 id="characterEditorTitle">Select a character</h3>
-                  <p id="characterEditorSummary">Choose a cast member to tweak their visual notes, or start a new one from a seed image.</p>
+                  <p id="characterEditorSummary">Choose an extra cast member to tweak their visual notes, or start a new one from a seed image.</p>
                   <p class="character-editor-status" id="characterEditorStatus"></p>
                 </div>
               </div>

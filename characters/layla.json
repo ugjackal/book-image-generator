@@ -1,7 +1,7 @@
 {
   "name": "Layla",
   "role": "Large mixed-breed dog",
-  "visualTraits": "Large dog with a mostly black coat and warm tan-brown markings on the muzzle, chest, and legs; smooth-to-soft coat; floppy ears; sturdy, broad-bodied build.",
+  "visualTraits": "Large dog with a mostly black coat and light black heading towards brown markings just a few tones from black on the muzzle, chest, and legs; smooth-to-soft coat; floppy ears; sturdy, broad-bodied build.",
   "birthState": "",
   "distinctiveAnatomy": "Broad muzzle, deep chest, strong front legs, floppy triangular ears, and a thick sturdy body.",
   "expressionPose": "Lying calmly on snow with front legs extended, body angled to the side, head raised and looking left; relaxed and watchful.",
@@ -11,8 +11,8 @@
   "familyNotes": "",
   "isGroupReference": false,
   "groupMembers": [],
-  "seedImageUrl": "/outputs/characters/layla-seed-fa36f445.jpg",
-  "thumbnailUrl": "",
+  "seedImageUrl": "/outputs/characters/layla-seed-bcb5aa13.jpg",
+  "thumbnailUrl": "/outputs/layla-352fb065.png",
   "createdAt": "2026-05-09T01:56:20.181859+00:00",
-  "updatedAt": "2026-05-09T01:56:20.181859+00:00"
+  "updatedAt": "2026-05-09T02:17:01.686329+00:00"
 }

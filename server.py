@@ -508,10 +508,16 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
         layout_instruction = layout_guidance(layout)
         if layout_label:
             lines.append(f"Layout: {layout_label}. {layout_instruction}")
+        padding_instruction = layout_padding_guidance(layout)
+        if padding_instruction:
+            lines.append(f"Padding: {padding_instruction}")
     if print_size:
         size_label = print_size_label(print_size)
         if size_label:
             lines.append(f"Print size: {size_label}.")
+        print_padding_instruction = print_size_padding_guidance(print_size)
+        if print_padding_instruction:
+            lines.append(f"Print safety: {print_padding_instruction}")
 
     if profiles:
         lines.append(f"Characters required in this scene: {len(profiles)}.")
@@ -593,6 +599,30 @@ def layout_guidance(layout: str) -> str:
         "overlay-centered": "Create a full-bleed background image with a soft, readable center area where text can sit over the art.",
         "overlay-top": "Create a full-bleed background image with a calmer upper area for text overlay.",
         "overlay-bottom": "Create a full-bleed background image with a calmer lower area for text overlay.",
+    }
+    return guidance.get(normalized, "")
+
+
+def layout_padding_guidance(layout: str) -> str:
+    normalized = str(layout).strip()
+    guidance = {
+        "stacked-image-top": "Keep the main art high in the frame and leave generous quiet space beneath it, with extra breathing room around every edge in case the page crop shifts later.",
+        "stacked-text-top": "Keep the main art low in the frame and leave generous quiet space above it, with extra breathing room around every edge in case the page crop shifts later.",
+        "spread-text-left": "Compose with the art anchored on the right side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
+        "spread-image-left": "Compose with the art anchored on the left side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
+        "overlay-centered": "Keep the focal art large but surrounded by a generous full-bleed safety zone so text placement and later cropping still have room to breathe.",
+        "overlay-top": "Keep the focal art slightly lower than center and leave generous open space above, with wide outer margins for future repositioning.",
+        "overlay-bottom": "Keep the focal art slightly higher than center and leave generous open space below, with wide outer margins for future repositioning.",
+    }
+    return guidance.get(normalized, "")
+
+
+def print_size_padding_guidance(print_size: str) -> str:
+    normalized = str(print_size).strip()
+    guidance = {
+        "landscape-10x8": "Use a wide landscape canvas with expansive left and right bleed and no important detail pressed against the edges.",
+        "portrait-8x10": "Use a tall portrait canvas with expansive top and bottom bleed and no important detail pressed against the edges.",
+        "square-10x10": "Use a balanced square canvas with generous padding on all sides and no important detail pressed against the edges.",
     }
     return guidance.get(normalized, "")
 

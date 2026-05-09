@@ -58,6 +58,7 @@ const refs = {
   globalStatus: $("#globalStatus"),
   globalStatusLabel: $("#globalStatusLabel"),
   globalStatusText: $("#globalStatusText"),
+  publishBookButton: $("#publishBookButton"),
   addPageButton: $("#addPageButton"),
   duplicatePageButton: $("#duplicatePageButton"),
   deletePageButton: $("#deletePageButton"),
@@ -84,7 +85,6 @@ const refs = {
   pageLighting: $("#pageLighting"),
   textSpace: $("#textSpace"),
   composition: $("#composition"),
-  pageLayout: $("#pageLayout"),
   pageTextScale: $("#pageTextScale"),
   pageTextScaleValue: $("#pageTextScaleValue"),
   pageTextVerticalToolbar: $("#pageTextVerticalToolbar"),
@@ -226,6 +226,7 @@ let characterDraft = null;
 let characterEditorOpen = false;
 let characterThumbnailGenerating = false;
 let characterSeedAnalyzing = false;
+let bookPublishing = false;
 
 function normalizeLoadedState(parsed) {
   const fallback = defaultState();
@@ -1046,7 +1047,6 @@ function render() {
   refs.pageLighting.value = page.lighting;
   refs.textSpace.value = page.textSpace;
   refs.composition.value = page.composition;
-  refs.pageLayout.value = normalizeLayout(page.layout);
   if (refs.activePageLabel) refs.activePageLabel.textContent = `Page ${page.number}`;
   refs.promptOutput.value = page.prompt || "";
   refs.copyPromptButton.disabled = !page.prompt;
@@ -1284,7 +1284,7 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
     ? draft.isGroupReference
       ? `Group reference profile${Array.isArray(draft.groupMembers) && draft.groupMembers.length ? ` for ${draft.groupMembers.join(", ")}` : ""}. Tweak the canonical group profile, then save it for the whole studio.`
       : "Tweak the cast profile, then save it for the whole studio."
-    : "Choose a cast member to tweak their visual notes, or start a new one from a seed image.";
+    : "Choose an extra cast member to tweak their visual notes, or start a new one from a seed image.";
   refs.characterEditorStatus.textContent = draft.seedImageFileName
     ? `Seed image loaded: ${draft.seedImageFileName}`
     : draft.seedImageUrl
@@ -1295,7 +1295,9 @@ function syncCharacterEditorChrome(previewUrl = "", draft = characterDraft || bl
     ? `Group reference for: ${draft.groupMembers.join(", ")}.`
     : "No thumbnail yet.";
 
-  refs.characterEditorThumbnail.innerHTML = previewUrl
+  refs.characterEditorThumbnail.innerHTML = characterThumbnailGenerating
+    ? `<div class="character-editor-placeholder is-loading" aria-live="polite" aria-busy="true"><span></span><strong>Generating</strong></div>`
+    : previewUrl
     ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(draft.name || "Character")} preview" loading="lazy" />`
     : `<div class="character-editor-placeholder"><span>${escapeHtml(characterBadge(draft.name || "Character"))}</span></div>`;
 
@@ -1333,8 +1335,13 @@ function renderFullBookPreviewMarkup(book) {
   const activeGeneratingPageId = state.isGenerating ? state.generatingPageId || activeBook().activePageId : "";
   return `
     <div class="full-book-preview-head">
-      <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
-      <span>${book.pages.length} pages</span>
+      <div class="full-book-preview-head-copy">
+        <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
+        <span>${book.pages.length} pages</span>
+      </div>
+      <div class="full-book-preview-head-actions">
+        <button class="primary-button${bookPublishing ? " is-loading" : ""}" type="button" id="publishBookButton" data-publish-book="true" aria-busy="${bookPublishing ? "true" : "false"}" ${book.pages.length && !bookPublishing ? "" : "disabled"}>${bookPublishing ? "Publishing..." : "Publish"}</button>
+      </div>
     </div>
     <div class="full-book-preview-list">
       ${book.pages
@@ -1614,8 +1621,8 @@ async function generatePageForId(pageId) {
     composition: page.composition,
     layout: page.layout,
     print_size: book.printSize,
-    characters: splitNames(page.characters),
-    character_profiles: splitNames(page.characters)
+    characters: mergeCharacterNames(inferCharacters(page.text), page.characters),
+    character_profiles: mergeCharacterNames(inferCharacters(page.text), page.characters)
       .map((name) => state.characters.find((character) => character.name === name))
       .filter(Boolean)
       .map((character) => ({
@@ -1673,6 +1680,43 @@ async function generatePageForId(pageId) {
     setStatus("Error", error.message || "Something went wrong while generating the page.");
   } finally {
     setGenerating(false);
+  }
+}
+
+async function publishBook() {
+  const book = activeBook();
+  if (!book.pages.length) {
+    setStatus("Nothing to publish", "Add at least one page before creating a PDF.");
+    return;
+  }
+
+  saveState();
+  bookPublishing = true;
+  setStatus("Publishing book", "Building a PDF from the current pages and layouts.");
+  renderBookPreview();
+
+  try {
+    const response = await fetch("/api/publish-book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ book }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Book publish failed.");
+    }
+    const downloadLink = document.createElement("a");
+    downloadLink.href = result.file_url;
+    downloadLink.download = result.file_name || "book.pdf";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    setStatus("Book published", `PDF ready for download: ${result.file_name || "book.pdf"}`);
+  } catch (error) {
+    setStatus("Publish failed", error.message || "Could not create the PDF.");
+  } finally {
+    bookPublishing = false;
+    renderBookPreview();
   }
 }
 
@@ -1759,6 +1803,22 @@ function splitNames(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function mergeCharacterNames(...sources) {
+  const seen = new Set();
+  const merged = [];
+  for (const source of sources) {
+    const names = Array.isArray(source) ? source : splitNames(String(source || ""));
+    for (const name of names) {
+      const normalized = name.trim();
+      const key = normalized.toLowerCase();
+      if (!normalized || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+    }
+  }
+  return merged;
 }
 
 async function saveCharacterDraft({ generateThumbnail = false } = {}) {
@@ -2344,7 +2404,6 @@ refs.pageForm.addEventListener("input", (event) => {
     pageLighting: "lighting",
     textSpace: "textSpace",
     composition: "composition",
-    pageLayout: "layout",
   };
   const key = keyMap[event.target.id];
   if (!key) return;
@@ -2353,6 +2412,11 @@ refs.pageForm.addEventListener("input", (event) => {
 
 refs.fullBookPreview.addEventListener("click", (event) => {
   const pageId = event.target.closest(".full-book-page")?.dataset.pageId || activePage().id;
+  const publishButton = event.target.closest("[data-publish-book]");
+  if (publishButton) {
+    publishBook();
+    return;
+  }
   const generateButton = event.target.closest("[data-generate-page-id]");
   if (generateButton) {
     generatePageForId(generateButton.dataset.generatePageId);

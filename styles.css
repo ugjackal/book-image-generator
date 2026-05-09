@@ -481,6 +481,7 @@ select:focus {
   transform: none;
 }
 
+.primary-button.is-loading,
 .ghost-button.is-loading {
   position: relative;
   gap: 10px;
@@ -490,6 +491,7 @@ select:focus {
   color: var(--accent);
 }
 
+.primary-button.is-loading::before,
 .ghost-button.is-loading::before {
   content: "";
   position: absolute;
@@ -756,6 +758,31 @@ select:focus {
   font-weight: 800;
 }
 
+.character-editor-placeholder.is-loading {
+  gap: 8px;
+  color: var(--accent);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.character-editor-placeholder.is-loading::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(230, 118, 63, 0.2);
+  border-top-color: var(--accent);
+  animation: spin 0.85s linear infinite;
+}
+
+.character-editor-placeholder.is-loading span,
+.character-editor-placeholder.is-loading strong {
+  display: block;
+  line-height: 1;
+}
+
 .character-editor-copy h3 {
   margin: 0;
 }
@@ -887,6 +914,19 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.full-book-preview-head-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.full-book-preview-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .full-book-preview-head strong {

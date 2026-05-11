@@ -1,8 +1,18 @@
 {
   "name": "Bella",
   "role": "Medium mixed-breed dog",
-  "visualTraits": "A medium-sized black mixed-breed dog with upright ears, a slim athletic build, a long narrow muzzle, a bright alert expression, and subtle white markings on the chest or muzzle if needed for readability.",
-  "distinctiveAnatomy": "Tall pointed ears, lean frame, elegant legs, and a graceful posture that still reads as friendly and approachable.",
-  "expressionPose": "Alert, curious, and calm, with a gentle farm-dog confidence.",
-  "styleNotes": "Keep Bella in the book's locked style: soft hand-painted children's-book illustration, warm natural colors, painterly brush texture, gentle storybook realism, simplified readable shapes, and no photorealism."
+  "visualTraits": "Medium-sized black dog with upright pointed ears, slim athletic build, long narrow muzzle, dark eyes, and small white markings on the chest and around the muzzle.",
+  "birthState": "",
+  "distinctiveAnatomy": "Tall erect ears, lean legs, narrow face, and a gently curved tail.",
+  "expressionPose": "Sitting upright and looking slightly upward with an alert, gentle expression.",
+  "styleNotes": "Keep Bella in the locked soft hand-painted children's-book style with warm natural colors, painterly texture, gentle realism, and clear simplified shapes; preserve her black coat with readable white chest and muzzle accents.",
+  "personality": "Alert, attentive, gentle, and intelligent-seeming.",
+  "groupIdentity": "Dog; mixed-breed family pet.",
+  "familyNotes": "Labeled as 'Mom,' implying she is the mother dog in the family group.",
+  "isGroupReference": false,
+  "groupMembers": [],
+  "seedImageUrl": "/outputs/characters/bella-seed-085de498.jpg",
+  "thumbnailUrl": "/outputs/bella-80272bb4.png",
+  "createdAt": "2026-05-10T18:47:48.019503+00:00",
+  "updatedAt": "2026-05-10T18:49:35.192674+00:00"
 }

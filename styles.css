@@ -243,6 +243,13 @@ button {
   margin-bottom: 14px;
 }
 
+.section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .section-head.compact {
   margin-bottom: 8px;
 }
@@ -467,6 +474,15 @@ select:focus {
 
 .full-width {
   width: 100%;
+}
+
+.prompt-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.prompt-actions .ghost-button {
+  flex: 1 1 0;
 }
 
 .primary-button:hover,
@@ -877,11 +893,18 @@ select:focus {
 .page-preview-layout-toolbar,
 .page-preview-font-toolbar,
 .page-preview-text-vertical-toolbar,
+.page-preview-text-horizontal-toolbar,
 .page-preview-text-scale-toolbar {
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
+}
+
+.page-preview-text-align-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .page-preview-text-scale-toolbar {
@@ -922,13 +945,6 @@ select:focus {
   min-width: 0;
 }
 
-.full-book-preview-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
 .full-book-preview-head strong {
   font-family: ui-serif, Georgia, "Times New Roman", serif;
 }
@@ -944,6 +960,39 @@ select:focus {
   gap: 14px;
 }
 
+.full-book-spread {
+  display: grid;
+  gap: 10px;
+}
+
+.full-book-spread-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 250, 244, 0.92);
+}
+
+.full-book-spread-head strong {
+  font-size: 0.92rem;
+}
+
+.full-book-spread-head span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.full-book-spread-pages {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
 .full-book-page {
   display: grid;
   gap: 10px;
@@ -951,6 +1000,12 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.full-book-page.is-blank-spread {
+  min-height: 220px;
+  border: 1px dashed rgba(233, 211, 192, 0.8);
+  background: rgba(255, 250, 244, 0.5);
 }
 
 .full-book-page-head {
@@ -1136,7 +1191,7 @@ select:focus {
   left: 50%;
   top: 50%;
   width: min(82%, 360px);
-  transform: translate(-50%, -50%);
+  max-width: 82%;
   padding: 10px 12px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.82);
@@ -1149,6 +1204,40 @@ select:focus {
 
 .mini-overlay-text.inline-page-text-editor.is-empty::before {
   content: attr(data-placeholder);
+}
+
+.overlay-top .mini-overlay-text {
+  top: 16px;
+  transform: translateX(-50%);
+}
+
+.overlay-center .mini-overlay-text,
+.overlay-centered .mini-overlay-text {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.overlay-bottom .mini-overlay-text {
+  bottom: 16px;
+  transform: translateX(-50%);
+}
+
+.overlay-left .mini-overlay-text,
+.overlay-right .mini-overlay-text {
+  top: 50%;
+  width: min(38%, 260px);
+  max-width: 38%;
+  text-align: left;
+  transform: translateY(-50%);
+}
+
+.overlay-left .mini-overlay-text {
+  left: 16px;
+}
+
+.overlay-right .mini-overlay-text {
+  left: auto;
+  right: 16px;
 }
 
 .inline-page-text-editor p,
@@ -1302,6 +1391,22 @@ select:focus {
   border-left: 1px solid var(--line);
 }
 
+.text-horizontal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(246, 248, 252, 0.92);
+}
+
+.font-control-row .text-horizontal-toolbar {
+  flex: 0 0 auto;
+  border-bottom: 0;
+  border-left: 1px solid var(--line);
+}
+
 .toolbar-label {
   color: var(--accent);
   font-size: 0.72rem;
@@ -1360,6 +1465,50 @@ select:focus {
 }
 
 .text-vertical-button.is-active {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(95, 159, 178, 0.12);
+  background: #f4fbfd;
+}
+
+.text-horizontal-button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+.text-horizontal-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+.text-horizontal-frame {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.text-horizontal-block {
+  fill: currentColor;
+}
+
+.text-horizontal-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(95, 159, 178, 0.5);
+  color: var(--accent-2);
+}
+
+.text-horizontal-button.is-active {
   border-color: var(--accent-2);
   color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(95, 159, 178, 0.12);
@@ -1515,6 +1664,7 @@ select:focus {
 .page-text-overlay {
   position: absolute;
   left: 50%;
+  top: 50%;
   width: min(78%, 420px);
   padding: 12px 14px;
   border: 1px solid rgba(255, 255, 255, 0.6);
@@ -1538,6 +1688,7 @@ select:focus {
 
 .overlay-top .page-text-overlay {
   top: 16px;
+  transform: translateX(-50%);
 }
 
 .overlay-center .page-text-overlay,
@@ -1548,6 +1699,123 @@ select:focus {
 
 .overlay-bottom .page-text-overlay {
   bottom: 16px;
+  transform: translateX(-50%);
+}
+
+.overlay-left .page-text-overlay,
+.overlay-right .page-text-overlay {
+  top: 50%;
+  width: min(38%, 300px);
+  text-align: left;
+  transform: translateY(-50%);
+}
+
+.overlay-left .page-text-overlay {
+  left: 16px;
+}
+
+.overlay-right .page-text-overlay {
+  left: auto;
+  right: 16px;
+}
+
+.overlay-pos-center-center .mini-overlay-text,
+.overlay-pos-center-center .page-text-overlay {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: min(82%, 420px);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.overlay-pos-top-center .mini-overlay-text,
+.overlay-pos-top-center .page-text-overlay {
+  top: 16px;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: min(82%, 420px);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.overlay-pos-bottom-center .mini-overlay-text,
+.overlay-pos-bottom-center .page-text-overlay {
+  top: auto;
+  left: 50%;
+  right: auto;
+  bottom: 16px;
+  width: min(82%, 420px);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.overlay-pos-center-left .mini-overlay-text,
+.overlay-pos-center-left .page-text-overlay {
+  top: 50%;
+  left: 16px;
+  right: auto;
+  bottom: auto;
+  width: min(42%, 300px);
+  text-align: left;
+  transform: translateY(-50%);
+}
+
+.overlay-pos-center-right .mini-overlay-text,
+.overlay-pos-center-right .page-text-overlay {
+  top: 50%;
+  left: auto;
+  right: 16px;
+  bottom: auto;
+  width: min(42%, 300px);
+  text-align: right;
+  transform: translateY(-50%);
+}
+
+.overlay-pos-top-left .mini-overlay-text,
+.overlay-pos-top-left .page-text-overlay {
+  top: 16px;
+  left: 16px;
+  right: auto;
+  bottom: auto;
+  width: min(42%, 300px);
+  text-align: left;
+  transform: none;
+}
+
+.overlay-pos-top-right .mini-overlay-text,
+.overlay-pos-top-right .page-text-overlay {
+  top: 16px;
+  left: auto;
+  right: 16px;
+  bottom: auto;
+  width: min(42%, 300px);
+  text-align: right;
+  transform: none;
+}
+
+.overlay-pos-bottom-left .mini-overlay-text,
+.overlay-pos-bottom-left .page-text-overlay {
+  top: auto;
+  left: 16px;
+  right: auto;
+  bottom: 16px;
+  width: min(42%, 300px);
+  text-align: left;
+  transform: none;
+}
+
+.overlay-pos-bottom-right .mini-overlay-text,
+.overlay-pos-bottom-right .page-text-overlay {
+  top: auto;
+  left: auto;
+  right: 16px;
+  bottom: 16px;
+  width: min(42%, 300px);
+  text-align: right;
+  transform: none;
 }
 
 .book-page-preview.layout-spread .layout-banner,

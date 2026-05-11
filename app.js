@@ -5,6 +5,8 @@ const DEFAULT_PAGE_FONT = "storybook-serif";
 const DEFAULT_PRINT_SIZE = "landscape-10x8";
 const DEFAULT_PAGE_TEXT_SCALE = 1;
 const DEFAULT_PAGE_TEXT_VERTICAL = "top";
+const DEFAULT_PAGE_TEXT_HORIZONTAL = "center";
+const DEFAULT_PAGE_TEXT_SPACE = "Leave a calm open area for real page text";
 const DEFAULT_IMAGE_OFFSET = 0;
 const IMAGE_OFFSET_MIN = -100;
 const IMAGE_OFFSET_MAX = 100;
@@ -21,9 +23,12 @@ const PAGE_LAYOUT_OPTIONS = [
   "spread-text-left",
   "spread-image-left",
   "overlay-centered",
+  "overlay-left",
+  "overlay-right",
   "overlay-top",
   "overlay-bottom",
 ];
+const PAGE_TEXT_HORIZONTAL_OPTIONS = ["left", "center", "right"];
 const PAGE_FONT_OPTIONS = ["storybook-serif", "clean-sans", "playful-hand"];
 const PAGE_TEXT_VERTICAL_OPTIONS = ["top", "center", "bottom"];
 const TEXT_SCALE_MIN = 0.7;
@@ -122,6 +127,7 @@ const refs = {
   statusLabel: $("#statusLabel"),
   statusText: $("#statusText"),
   promptOutput: $("#promptOutput"),
+  updatePromptButton: $("#updatePromptButton"),
   copyPromptButton: $("#copyPromptButton"),
 };
 
@@ -134,11 +140,12 @@ const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
   setting: "",
   mood: "",
   lighting: "Warm natural children's-book daylight.",
-  textSpace: "Leave quiet open space where the page text can sit clearly.",
+  textSpace: defaultTextSpaceForLayout(layout),
   composition: "Landscape picture-book page composition with readable character silhouettes.",
   layout: normalizeLayout(layout),
   fontPreset: DEFAULT_PAGE_FONT,
   fontScale: DEFAULT_PAGE_TEXT_SCALE,
+  textHorizontalAlign: DEFAULT_PAGE_TEXT_HORIZONTAL,
   textVerticalAlign: DEFAULT_PAGE_TEXT_VERTICAL,
   printSize: DEFAULT_PRINT_SIZE,
   imageScale: 1,
@@ -183,7 +190,7 @@ const exampleBook = () => {
       characters: "Layla, Ginger",
       setting: "A rustic yard with packed dirt and dry grass around the edges.",
       mood: "Playful, mischievous, energetic, and safe for young readers.",
-      textSpace: "Leave a quiet open area at the top left for the story text.",
+      textSpace: "",
     },
   ];
   book.activePageId = book.pages[0].id;
@@ -364,7 +371,12 @@ function normalizeBook(book) {
     imageOffsetY: normalizeImageOffset(page.imageOffsetY),
     fontPreset: normalizeFontPreset(page.fontPreset),
     fontScale: normalizeTextScale(page.fontScale),
-    textVerticalAlign: normalizeTextVerticalAlign(page.textVerticalAlign),
+    textHorizontalAlign: normalizeTextHorizontalAlign(
+      page.textHorizontalAlign || legacyOverlayAlignments(page.layout).horizontal || DEFAULT_PAGE_TEXT_HORIZONTAL,
+    ),
+    textVerticalAlign: normalizeTextVerticalAlign(
+      page.textVerticalAlign || legacyOverlayAlignments(page.layout).vertical || DEFAULT_PAGE_TEXT_VERTICAL,
+    ),
     imageDataUrl: page.imageDataUrl || "",
     imageUrl: page.imageDataUrl || page.imageUrl || "",
   }));
@@ -381,9 +393,15 @@ function normalizePages(pages) {
     layout: normalizeLayout(page?.layout),
     fontPreset: normalizeFontPreset(page?.fontPreset),
     fontScale: normalizeTextScale(page?.fontScale),
-    textVerticalAlign: normalizeTextVerticalAlign(page?.textVerticalAlign),
+    textHorizontalAlign: normalizeTextHorizontalAlign(
+      page?.textHorizontalAlign || legacyOverlayAlignments(page?.layout).horizontal || DEFAULT_PAGE_TEXT_HORIZONTAL,
+    ),
+    textVerticalAlign: normalizeTextVerticalAlign(
+      page?.textVerticalAlign || legacyOverlayAlignments(page?.layout).vertical || DEFAULT_PAGE_TEXT_VERTICAL,
+    ),
     imageOffsetX: normalizeImageOffset(page?.imageOffsetX),
     imageOffsetY: normalizeImageOffset(page?.imageOffsetY),
+    textSpace: resolvedTextSpaceForPage(page),
   }));
 }
 
@@ -424,6 +442,7 @@ function printSizeDimensions(printSize) {
 
 function normalizeLayout(layout) {
   const value = String(layout || "").trim();
+  if (value === "overlay") return "overlay-centered";
   return PAGE_LAYOUT_OPTIONS.includes(value) ? value : DEFAULT_PAGE_LAYOUT;
 }
 
@@ -432,9 +451,26 @@ function normalizeFontPreset(fontPreset) {
   return PAGE_FONT_OPTIONS.includes(value) ? value : DEFAULT_PAGE_FONT;
 }
 
+function normalizeTextHorizontalAlign(value) {
+  const normalized = String(value || "").trim();
+  return PAGE_TEXT_HORIZONTAL_OPTIONS.includes(normalized) ? normalized : DEFAULT_PAGE_TEXT_HORIZONTAL;
+}
+
 function normalizeTextVerticalAlign(value) {
   const normalized = String(value || "").trim();
   return PAGE_TEXT_VERTICAL_OPTIONS.includes(normalized) ? normalized : DEFAULT_PAGE_TEXT_VERTICAL;
+}
+
+function textHorizontalJustify(value) {
+  switch (normalizeTextHorizontalAlign(value)) {
+    case "center":
+      return "center";
+    case "right":
+      return "flex-end";
+    case "left":
+    default:
+      return "flex-start";
+  }
 }
 
 function textVerticalJustify(value) {
@@ -558,12 +594,16 @@ function layoutLabel(layout) {
       return "Text left, image right";
     case "spread-image-left":
       return "Image left, text right";
-    case "overlay-centered":
-      return "Background image, centered text";
+    case "overlay-left":
+      return "Text on background, left";
+    case "overlay-right":
+      return "Text on background, right";
     case "overlay-top":
-      return "Background image, top text";
+      return "Text on background, top";
     case "overlay-bottom":
-      return "Background image, bottom text";
+      return "Text on background, bottom";
+    case "overlay-centered":
+      return "Text on background, centered";
     case "stacked-image-top":
     default:
       return "Image top, text bottom";
@@ -573,15 +613,158 @@ function layoutLabel(layout) {
 function layoutMode(layout) {
   const value = normalizeLayout(layout);
   if (value.startsWith("spread-")) return "spread";
-  if (value.startsWith("overlay-")) return "overlay";
+  if (value.startsWith("overlay")) return "overlay";
   return "stacked";
 }
 
-function layoutOverlayPosition(layout) {
-  const value = normalizeLayout(layout);
-  if (value === "overlay-top") return "top";
-  if (value === "overlay-bottom") return "bottom";
-  return "center";
+function overlayTextAreaForLayout(layout) {
+  switch (normalizeLayout(layout)) {
+    case "overlay-left":
+      return "left";
+    case "overlay-right":
+      return "right";
+    case "overlay-top":
+      return "top";
+    case "overlay-bottom":
+      return "bottom";
+    case "overlay-centered":
+    default:
+      return "centered";
+  }
+}
+
+function defaultTextSpaceForLayout(layout) {
+  switch (normalizeLayout(layout)) {
+    case "stacked-text-top":
+    case "spread-text-left":
+    case "spread-image-left":
+      return "";
+    case "overlay-centered":
+    case "overlay-left":
+    case "overlay-right":
+    case "overlay-top":
+    case "overlay-bottom":
+      return overlayTextAreaForLayout(layout);
+    case "stacked-image-top":
+    default:
+      return "";
+  }
+}
+
+function isAutoTextSpaceValue(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return [
+    "leave a calm open area for real page text",
+    "leave quiet open space where the page text can sit clearly.",
+    "leave a quiet open area at the top left for the story text.",
+    "place the story text below the image.",
+    "place the story text above the image.",
+    "place the story text on the left page.",
+    "place the story text on the right page.",
+    "upper left",
+    "upper center",
+    "upper right",
+    "centered",
+    "left",
+    "right",
+    "lower left",
+    "lower center",
+    "lower right",
+    "keep the text in a calmer upper area of the image.",
+    "keep the text in a calmer lower area of the image.",
+    "top",
+    "bottom",
+  ].includes(normalized);
+}
+
+function overlayTextAreaLabel(horizontal, vertical) {
+  const h = normalizeTextHorizontalAlign(horizontal);
+  const v = normalizeTextVerticalAlign(vertical);
+  if (h === "center" && v === "center") return "centered";
+  if (h === "left" && v === "center") return "left";
+  if (h === "right" && v === "center") return "right";
+  if (h === "center" && v === "top") return "top";
+  if (h === "center" && v === "bottom") return "bottom";
+  const verticalWord = v === "top" ? "upper" : v === "bottom" ? "lower" : "center";
+  const horizontalWord = h === "center" ? "center" : h;
+  return `${verticalWord} ${horizontalWord}`.trim();
+}
+
+function resolvedTextSpaceForPage(page) {
+  const current = String(page?.textSpace || "").trim();
+  const layout = normalizeLayout(page?.layout);
+  if (!current) {
+    return layoutMode(layout) === "overlay" ? defaultTextSpaceForLayout(layout) : "";
+  }
+  if (layoutMode(layout) === "overlay") {
+    return isAutoTextSpaceValue(current) ? defaultTextSpaceForLayout(layout) : current;
+  }
+  return "";
+}
+
+function textVerticalAlignForLayout(layout) {
+  switch (normalizeLayout(layout)) {
+    case "overlay-centered":
+    case "overlay-left":
+    case "overlay-right":
+    case "overlay-top":
+    case "overlay-bottom":
+      return "center";
+    default:
+      return DEFAULT_PAGE_TEXT_VERTICAL;
+  }
+}
+
+function textHorizontalAlignForLayout(layout) {
+  switch (normalizeLayout(layout)) {
+    case "overlay-centered":
+    case "overlay-left":
+    case "overlay-right":
+    case "overlay-top":
+    case "overlay-bottom":
+      return "center";
+    default:
+      return DEFAULT_PAGE_TEXT_HORIZONTAL;
+  }
+}
+
+function overlayPlacementClass(horizontal, vertical) {
+  const h = normalizeTextHorizontalAlign(horizontal);
+  const v = normalizeTextVerticalAlign(vertical);
+  return `overlay-pos-${v}-${h}`;
+}
+
+function overlayPlacementClassForLayout(layout) {
+  switch (normalizeLayout(layout)) {
+    case "overlay-left":
+      return overlayPlacementClass("left", "center");
+    case "overlay-right":
+      return overlayPlacementClass("right", "center");
+    case "overlay-top":
+      return overlayPlacementClass("center", "top");
+    case "overlay-bottom":
+      return overlayPlacementClass("center", "bottom");
+    case "overlay-centered":
+    default:
+      return overlayPlacementClass("center", "center");
+  }
+}
+
+function legacyOverlayAlignments(layout) {
+  const value = String(layout || "").trim();
+  switch (value) {
+    case "overlay-left":
+      return { horizontal: "left", vertical: "center" };
+    case "overlay-right":
+      return { horizontal: "right", vertical: "center" };
+    case "overlay-top":
+      return { horizontal: "center", vertical: "top" };
+    case "overlay-bottom":
+      return { horizontal: "center", vertical: "bottom" };
+    case "overlay-centered":
+    default:
+      return { horizontal: "center", vertical: "center" };
+  }
 }
 
 function layoutIcon(layout) {
@@ -607,25 +790,39 @@ function layoutIcon(layout) {
           <rect class="layout-icon-text" x="13" y="4" width="8" height="16" rx="1.5"></rect>
         </svg>
       `;
-    case "overlay-centered":
+    case "overlay-left":
       return `
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
-          <rect class="layout-icon-text" x="8" y="8" width="8" height="8" rx="1.5"></rect>
+          <rect class="layout-icon-text" x="5" y="7" width="6" height="10" rx="1.5"></rect>
+        </svg>
+      `;
+    case "overlay-right":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="13" y="7" width="6" height="10" rx="1.5"></rect>
         </svg>
       `;
     case "overlay-top":
       return `
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
-          <rect class="layout-icon-text" x="6" y="5" width="12" height="4" rx="1.25"></rect>
+          <rect class="layout-icon-text" x="7" y="5" width="10" height="5" rx="1.5"></rect>
         </svg>
       `;
     case "overlay-bottom":
       return `
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
-          <rect class="layout-icon-text" x="6" y="15" width="12" height="4" rx="1.25"></rect>
+          <rect class="layout-icon-text" x="7" y="14" width="10" height="5" rx="1.5"></rect>
+        </svg>
+      `;
+    case "overlay-centered":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-image" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="8" y="8" width="8" height="8" rx="1.5"></rect>
         </svg>
       `;
     case "stacked-image-top":
@@ -669,18 +866,9 @@ function printSizeIcon(printSize) {
 
 function renderLayoutToolbar(activeLayout, pageId = "") {
   const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
-  const options = [
-    "stacked-image-top",
-    "stacked-text-top",
-    "spread-text-left",
-    "spread-image-left",
-    "overlay-centered",
-    "overlay-top",
-    "overlay-bottom",
-  ];
   return `
     <div class="layout-toolbar" role="toolbar" aria-label="Page layout"${pageAttr}>
-      ${options
+      ${PAGE_LAYOUT_OPTIONS
         .map((layout) => {
           const selected = normalizeLayout(activeLayout) === layout ? " is-active" : "";
           return `
@@ -798,6 +986,31 @@ function renderPreviewTextVerticalToolbarCompact(activeValue, pageId = "") {
   `;
 }
 
+function renderPreviewTextHorizontalToolbarCompact(activeValue, pageId = "") {
+  const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
+  return `
+    <div class="page-preview-text-horizontal-toolbar page-preview-text-horizontal-compact" role="toolbar" aria-label="Text horizontal position"${pageAttr}>
+      ${PAGE_TEXT_HORIZONTAL_OPTIONS.map((choice) => {
+        const selected = normalizeTextHorizontalAlign(activeValue) === choice ? " is-active" : "";
+        const label = choice === "left" ? "Left" : choice === "right" ? "Right" : "Center";
+        return `
+          <button
+            class="text-horizontal-button${selected}"
+            type="button"
+            data-text-horizontal-choice="${choice}"
+            ${pageId ? `data-page-id="${escapeHtml(pageId)}"` : ""}
+            aria-pressed="${normalizeTextHorizontalAlign(activeValue) === choice ? "true" : "false"}"
+            title="${escapeHtml(`${label} align`)}"
+            aria-label="${escapeHtml(`${label} align`)}"
+          >
+            ${textHorizontalIcon(choice)}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderPreviewTextScaleToolbarCompact(activeScale, pageId = "") {
   const pageAttr = pageId ? ` data-page-id="${escapeHtml(pageId)}"` : "";
   return `
@@ -889,6 +1102,33 @@ function textVerticalIcon(choice) {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect class="text-vertical-frame" x="5" y="4" width="14" height="16" rx="2"></rect>
           <rect class="text-vertical-block" x="7" y="6" width="10" height="4" rx="1.2"></rect>
+        </svg>
+      `;
+  }
+}
+
+function textHorizontalIcon(choice) {
+  switch (choice) {
+    case "center":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-horizontal-frame" x="4" y="5" width="16" height="14" rx="2"></rect>
+          <rect class="text-horizontal-block" x="8" y="9" width="8" height="6" rx="1.2"></rect>
+        </svg>
+      `;
+    case "right":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-horizontal-frame" x="4" y="5" width="16" height="14" rx="2"></rect>
+          <rect class="text-horizontal-block" x="12" y="9" width="6" height="6" rx="1.2"></rect>
+        </svg>
+      `;
+    case "left":
+    default:
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="text-horizontal-frame" x="4" y="5" width="16" height="14" rx="2"></rect>
+          <rect class="text-horizontal-block" x="6" y="9" width="6" height="6" rx="1.2"></rect>
         </svg>
       `;
   }
@@ -1049,12 +1289,19 @@ function render() {
   refs.pageSetting.value = page.setting;
   refs.pageMood.value = page.mood;
   refs.pageLighting.value = page.lighting;
-  refs.textSpace.value = page.textSpace;
+  refs.textSpace.value = resolvedTextSpaceForPage(page);
   refs.composition.value = page.composition;
   if (refs.activePageLabel) refs.activePageLabel.textContent = `Page ${page.number}`;
   refs.promptOutput.value = page.prompt || "";
+  refs.updatePromptButton.disabled = false;
   refs.copyPromptButton.disabled = !page.prompt;
   refs.deletePageButton.disabled = book.pages.length <= 1;
+  if (refs.publishBookButton) {
+    refs.publishBookButton.disabled = !book.pages.length || bookPublishing;
+    refs.publishBookButton.textContent = bookPublishing ? "Publishing..." : "Publish";
+    refs.publishBookButton.classList.toggle("is-loading", bookPublishing);
+    refs.publishBookButton.setAttribute("aria-busy", bookPublishing ? "true" : "false");
+  }
 
   refs.coverPreview.innerHTML = book.coverPreviewUrl
     ? `<img src="${book.coverPreviewUrl}" alt="Style reference cover" />`
@@ -1122,22 +1369,23 @@ function renderPageList() {
 }
 
 function normalizeCharacterRecord(character = {}) {
+  const isGroupReference = parseBool(character.isGroupReference ?? character.is_group_reference);
   return {
     name: String(character.name || "").trim(),
     role: String(character.role || character.characterRole || "").trim(),
-    isGroupReference: parseBool(character.isGroupReference ?? character.is_group_reference),
+    isGroupReference,
     groupMembers: Array.isArray(character.groupMembers)
       ? character.groupMembers.map((item) => String(item).trim()).filter(Boolean)
       : String(character.groupMembers || character.group_members || "")
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
-    visualTraits: String(character.visualTraits || character.visual_traits || "").trim(),
-    birthState: String(character.birthState || character.birth_state || "").trim(),
-    distinctiveAnatomy: String(character.distinctiveAnatomy || character.distinctive_anatomy || "").trim(),
+    visualTraits: isGroupReference ? "" : String(character.visualTraits || character.visual_traits || "").trim(),
+    birthState: isGroupReference ? "" : String(character.birthState || character.birth_state || "").trim(),
+    distinctiveAnatomy: isGroupReference ? "" : String(character.distinctiveAnatomy || character.distinctive_anatomy || "").trim(),
     expressionPose: String(character.expressionPose || character.expression_pose || "").trim(),
     styleNotes: String(character.styleNotes || character.style_notes || "").trim(),
-    personality: String(character.personality || "").trim(),
+    personality: isGroupReference ? "" : String(character.personality || "").trim(),
     groupIdentity: String(character.groupIdentity || character.group_identity || "").trim(),
     familyNotes: String(character.familyNotes || character.family_notes || "").trim(),
     thumbnailUrl: String(character.thumbnailUrl || character.thumbnail_url || "").trim(),
@@ -1169,6 +1417,21 @@ function blankCharacterDraft() {
   };
 }
 
+function setCharacterGroupFieldVisibility(isGroupReference) {
+  const fields = [
+    refs.characterEditorVisualTraits,
+    refs.characterEditorBirthState,
+    refs.characterEditorDistinctiveAnatomy,
+  ];
+  for (const input of fields) {
+    const wrapper = input?.closest("label.field");
+    if (!wrapper) continue;
+    const shouldHide = Boolean(isGroupReference);
+    wrapper.hidden = shouldHide;
+    wrapper.style.display = shouldHide ? "none" : "";
+  }
+}
+
 function activeCharacter() {
   return state.characters.find((character) => character.name === activeCharacterName) || null;
 }
@@ -1190,12 +1453,12 @@ function setCharacterDraftFromRecord(character, { isNew = false } = {}) {
     role: normalized.role,
     isGroupReference: normalized.isGroupReference,
     groupMembers: normalized.groupMembers,
-    visualTraits: normalized.visualTraits,
-    birthState: normalized.birthState,
-    distinctiveAnatomy: normalized.distinctiveAnatomy,
+    visualTraits: normalized.isGroupReference ? "" : normalized.visualTraits,
+    birthState: normalized.isGroupReference ? "" : normalized.birthState,
+    distinctiveAnatomy: normalized.isGroupReference ? "" : normalized.distinctiveAnatomy,
     expressionPose: normalized.expressionPose,
     styleNotes: normalized.styleNotes,
-    personality: normalized.personality,
+    personality: normalized.isGroupReference ? "" : normalized.personality,
     groupIdentity: normalized.groupIdentity,
     familyNotes: normalized.familyNotes,
     thumbnailUrl: normalized.thumbnailUrl,
@@ -1260,16 +1523,18 @@ function renderCharacterEditor() {
   refs.characterEditor.hidden = !shouldShow;
   refs.characterEditor.style.display = shouldShow ? "" : "none";
   if (!shouldShow) return;
+  const isGroupReference = Boolean(draft.isGroupReference);
   refs.characterEditorName.value = draft.name || "";
   refs.characterEditorRole.value = draft.role || "";
   if (refs.characterEditorIsGroupReference) refs.characterEditorIsGroupReference.checked = Boolean(draft.isGroupReference);
   if (refs.characterEditorGroupMembers) refs.characterEditorGroupMembers.value = Array.isArray(draft.groupMembers) ? draft.groupMembers.join(", ") : "";
-  refs.characterEditorVisualTraits.value = draft.visualTraits || "";
-  if (refs.characterEditorBirthState) refs.characterEditorBirthState.value = draft.birthState || "";
-  refs.characterEditorDistinctiveAnatomy.value = draft.distinctiveAnatomy || "";
+  setCharacterGroupFieldVisibility(isGroupReference);
+  if (refs.characterEditorVisualTraits) refs.characterEditorVisualTraits.value = isGroupReference ? "" : (draft.visualTraits || "");
+  if (refs.characterEditorBirthState) refs.characterEditorBirthState.value = isGroupReference ? "" : (draft.birthState || "");
+  if (refs.characterEditorDistinctiveAnatomy) refs.characterEditorDistinctiveAnatomy.value = isGroupReference ? "" : (draft.distinctiveAnatomy || "");
   refs.characterEditorExpressionPose.value = draft.expressionPose || "";
   refs.characterEditorStyleNotes.value = draft.styleNotes || "";
-  if (refs.characterEditorPersonality) refs.characterEditorPersonality.value = draft.personality || "";
+  if (refs.characterEditorPersonality) refs.characterEditorPersonality.value = isGroupReference ? "" : (draft.personality || "");
   if (refs.characterEditorGroupIdentity) refs.characterEditorGroupIdentity.value = draft.groupIdentity || "";
   if (refs.characterEditorFamilyNotes) refs.characterEditorFamilyNotes.value = draft.familyNotes || "";
   syncCharacterEditorChrome(previewUrl, draft);
@@ -1335,148 +1600,168 @@ function renderBookPreview() {
   renderFullBookPreview();
 }
 
+function renderFullBookPageCard(book, page, activeGeneratingPageId) {
+  const layout = normalizeLayout(page.layout);
+  const text = page.text.trim();
+  const pageStyle = `--page-text-font:${fontStack(page.fontPreset)};--page-text-scale:${effectiveTextScale(book, page)};--page-image-scale:${normalizeImageScale(page.imageScale)};--page-image-offset-x:${normalizeImageOffset(page.imageOffsetX)};--page-image-offset-y:${normalizeImageOffset(page.imageOffsetY)};--page-text-justify:${textVerticalJustify(page.textVerticalAlign)};`;
+  const isGeneratingPage = activeGeneratingPageId === page.id;
+  const imageScale = normalizeImageScale(page.imageScale);
+  const imageOffsetX = normalizeImageOffset(page.imageOffsetX);
+  const imageOffsetY = normalizeImageOffset(page.imageOffsetY);
+  const imageStyle = `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:${(imageScale * 100).toFixed(2)}%;height:${(imageScale * 100).toFixed(2)}%;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+  const textFontStyle = `font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};`;
+  const textScaleStyle = `font-size:${effectiveTextScale(book, page).toFixed(3)}rem;`;
+  const textJustifyStyle = `justify-content:${textVerticalJustify(page.textVerticalAlign)};`;
+  const textAlignStyle = `text-align:${normalizeTextHorizontalAlign(page.textHorizontalAlign)};`;
+  const overlayTextStyle = `display:flex;flex-direction:column;justify-content:${textVerticalJustify(page.textVerticalAlign)};align-items:${textHorizontalJustify(page.textHorizontalAlign)};font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};font-size:${(effectiveTextScale(book, page) * 0.95).toFixed(3)}rem;text-align:${normalizeTextHorizontalAlign(page.textHorizontalAlign)};`;
+  const overlayPlacement = overlayPlacementClassForLayout(page.layout);
+  const textEditorAttrs = `contenteditable="true" spellcheck="true" role="textbox" aria-label="Edit page text" data-inline-page-text-editor="true" data-page-id="${escapeHtml(page.id)}" data-placeholder="Click to edit page text"`;
+  const imageMarkup = `
+    <div class="page-art${isGeneratingPage ? " is-generating" : ""}">
+      ${
+        isGeneratingPage
+          ? `
+            <div class="loading-indicator" aria-hidden="true"></div>
+            <div class="page-art-empty-state"><span class="page-art-empty-state-label">Generating page ${page.number} illustration...</span></div>
+          `
+          : page.imageUrl
+          ? `<div class="page-art-frame"><img src="${escapeHtml(page.imageUrl)}" alt="Preview for page ${page.number}" style="${imageStyle}" /></div>`
+          : `<div class="page-art-empty-state"><span class="page-art-empty-state-label">No image yet</span></div>`
+      }
+    </div>`;
+  const textMarkup = `<div class="mini-text-preview inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${textFontStyle}${textScaleStyle}${textJustifyStyle}${textAlignStyle}">${text ? escapeHtml(text) : ""}</div>`;
+  const previewToolbar = `
+    <div class="page-preview-toolbar" data-page-id="${escapeHtml(page.id)}">
+      <div class="page-preview-layout-row">
+        ${renderPreviewLayoutToolbar(layout, page.id)}
+      </div>
+      <div class="page-preview-font-row">
+        ${renderPreviewFontToolbar(page.fontPreset, page.id)}
+        <div class="page-preview-text-align-stack">
+          ${renderPreviewTextVerticalToolbarCompact(page.textVerticalAlign, page.id)}
+          ${renderPreviewTextHorizontalToolbarCompact(page.textHorizontalAlign, page.id)}
+        </div>
+        ${renderPreviewTextScaleToolbarCompact(page.fontScale, page.id)}
+      </div>
+      <div class="page-preview-image-actions">
+        <button
+          class="ghost-button icon-button"
+          type="button"
+          data-generate-page-id="${escapeHtml(page.id)}"
+          aria-label="Generate illustration"
+          title="Generate illustration"
+          ${isGeneratingPage ? "disabled" : ""}
+        >
+          <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3l1.8 4.6L18 9.5l-4.2 1.4L12 15l-1.8-4.1L6 9.5l4.2-1.9L12 3zM5 16l1 2.2L8 19l-2 .8L5 22l-1-2.2L2 19l2-.8L5 16zm14-2l1.3 3 3 .7-3 .8-1.2 3-1.2-3-3-.8 3-.7 1.1-3z" fill="currentColor"/>
+          </svg>
+        </button>
+        <a
+          class="ghost-button icon-button${page.imageUrl ? "" : " is-disabled"}"
+          href="${page.imageUrl || "#"}"
+          download="${escapeHtml(page.fileName || `page-${page.number}-scene.png`)}"
+          ${page.imageUrl ? "" : 'aria-disabled="true" tabindex="-1"'}
+          aria-label="Download page image"
+          title="Download page image"
+        >
+          <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v11M8 10l4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+          </svg>
+        </a>
+        <label class="ghost-button icon-button file-button" aria-label="Upload image to this page" title="Upload image to this page">
+          <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 21V11m0 0l4 4m-4-4-4 4M5 5h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+          </svg>
+          <input type="file" accept="image/*" data-page-upload-input="true" data-page-id="${escapeHtml(page.id)}" />
+        </label>
+        <button
+          class="ghost-button icon-button"
+          type="button"
+          data-clear-page-image-id="${escapeHtml(page.id)}"
+          aria-label="Clear page image"
+          title="Clear page image"
+        >
+          <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16M9 7V5h6v2m-7 0 1 12h6l1-12M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  `;
+  const body =
+    layoutMode(layout) === "spread"
+      ? `<div class="mini-spread">
+          <div class="mini-spread-side">${layout === "spread-text-left" ? textMarkup : imageMarkup}</div>
+          <div class="mini-spread-spine"></div>
+          <div class="mini-spread-side">${layout === "spread-text-left" ? imageMarkup : textMarkup}</div>
+        </div>`
+      : layoutMode(layout) === "overlay"
+      ? `<div class="mini-overlay ${overlayPlacement}">
+          ${imageMarkup}
+          <div class="mini-overlay-text inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${overlayTextStyle}">${text ? escapeHtml(text) : ""}</div>
+        </div>`
+      : layout === "stacked-text-top"
+      ? `<div class="mini-stack">${textMarkup}${imageMarkup}</div>`
+      : `<div class="mini-stack">${imageMarkup}${textMarkup}</div>`;
+  const imageControls = `
+    <div class="page-image-controls" data-page-id="${escapeHtml(page.id)}">
+      <div class="page-image-controls-row page-image-adjust-row">
+        <div class="page-image-nudge-group">
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up"${page.imageUrl ? "" : " disabled"}>&#8593;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left"${page.imageUrl ? "" : " disabled"}>&#8592;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image"${page.imageUrl ? "" : " disabled"}>&#10226;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right"${page.imageUrl ? "" : " disabled"}>&#8594;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down"${page.imageUrl ? "" : " disabled"}>&#8595;</button>
+        </div>
+        <div class="page-image-scale-group">
+          <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller"${page.imageUrl ? "" : " disabled"}>&#8722;</button>
+          <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger"${page.imageUrl ? "" : " disabled"}>+</button>
+        </div>
+      </div>
+    </div>
+  `;
+  return `
+    <article class="full-book-page" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
+      <header class="full-book-page-head">
+        <strong>Page ${page.number}</strong>
+        <button class="ghost-button small-button" type="button" data-edit-page-id="${page.id}">Edit</button>
+      </header>
+      ${previewToolbar}
+      ${body}
+      ${imageControls}
+    </article>
+  `;
+}
+
 function renderFullBookPreviewMarkup(book) {
   const activeGeneratingPageId = state.isGenerating ? state.generatingPageId || activeBook().activePageId : "";
+  const spreadRows = [];
+  for (let i = 0; i < book.pages.length; i += 2) {
+    const leftPage = book.pages[i];
+    const rightPage = book.pages[i + 1] || null;
+    const spreadLabel = rightPage ? `Pages ${leftPage.number}-${rightPage.number}` : `Page ${leftPage.number}`;
+    spreadRows.push(`
+      <section class="full-book-spread">
+        <header class="full-book-spread-head">
+          <strong>${escapeHtml(spreadLabel)}</strong>
+          <span>${rightPage ? "Facing pages preview" : "Single page preview"}</span>
+        </header>
+        <div class="full-book-spread-pages">
+          ${renderFullBookPageCard(book, leftPage, activeGeneratingPageId)}
+          ${rightPage ? renderFullBookPageCard(book, rightPage, activeGeneratingPageId) : `<article class="full-book-page is-blank-spread" aria-hidden="true"></article>`}
+        </div>
+      </section>
+    `);
+  }
   return `
     <div class="full-book-preview-head">
       <div class="full-book-preview-head-copy">
         <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
         <span>${book.pages.length} pages</span>
       </div>
-      <div class="full-book-preview-head-actions">
-        <button class="primary-button${bookPublishing ? " is-loading" : ""}" type="button" id="publishBookButton" data-publish-book="true" aria-busy="${bookPublishing ? "true" : "false"}" ${book.pages.length && !bookPublishing ? "" : "disabled"}>${bookPublishing ? "Publishing..." : "Publish"}</button>
-      </div>
     </div>
     <div class="full-book-preview-list">
-      ${book.pages
-        .map((page) => {
-          const layout = normalizeLayout(page.layout);
-          const text = page.text.trim();
-          const pageStyle = `--page-text-font:${fontStack(page.fontPreset)};--page-text-scale:${effectiveTextScale(book, page)};--page-image-scale:${normalizeImageScale(page.imageScale)};--page-image-offset-x:${normalizeImageOffset(page.imageOffsetX)};--page-image-offset-y:${normalizeImageOffset(page.imageOffsetY)};--page-text-justify:${textVerticalJustify(page.textVerticalAlign)};`;
-          const isGeneratingPage = activeGeneratingPageId === page.id;
-          const imageScale = normalizeImageScale(page.imageScale);
-          const imageOffsetX = normalizeImageOffset(page.imageOffsetX);
-          const imageOffsetY = normalizeImageOffset(page.imageOffsetY);
-          const imageStyle = `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:${(imageScale * 100).toFixed(2)}%;height:${(imageScale * 100).toFixed(2)}%;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
-          const textFontStyle = `font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};`;
-          const textScaleStyle = `font-size:${effectiveTextScale(book, page).toFixed(3)}rem;`;
-          const textJustifyStyle = `justify-content:${textVerticalJustify(page.textVerticalAlign)};`;
-          const overlayTextStyle = `font-family:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};font-size:${(effectiveTextScale(book, page) * 0.95).toFixed(3)}rem;`;
-          const textEditorAttrs = `contenteditable="true" spellcheck="true" role="textbox" aria-label="Edit page text" data-inline-page-text-editor="true" data-page-id="${escapeHtml(page.id)}" data-placeholder="Click to edit page text"`;
-          const imageMarkup = `
-            <div class="page-art${isGeneratingPage ? " is-generating" : ""}">
-              ${
-                isGeneratingPage
-                  ? `
-                    <div class="loading-indicator" aria-hidden="true"></div>
-                    <div class="page-art-empty-state"><span class="page-art-empty-state-label">Generating page ${page.number} illustration...</span></div>
-                  `
-                  : page.imageUrl
-                  ? `<div class="page-art-frame"><img src="${escapeHtml(page.imageUrl)}" alt="Preview for page ${page.number}" style="${imageStyle}" /></div>`
-                  : `<div class="page-art-empty-state"><span class="page-art-empty-state-label">No image yet</span></div>`
-              }
-            </div>`;
-          const textMarkup = `<div class="mini-text-preview inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${textFontStyle}${textScaleStyle}${textJustifyStyle}">${text ? escapeHtml(text) : ""}</div>`;
-          const previewToolbar = `
-            <div class="page-preview-toolbar" data-page-id="${escapeHtml(page.id)}">
-              <div class="page-preview-layout-row">
-                ${renderPreviewLayoutToolbar(layout, page.id)}
-              </div>
-              <div class="page-preview-font-row">
-                ${renderPreviewFontToolbar(page.fontPreset, page.id)}
-                ${renderPreviewTextVerticalToolbarCompact(page.textVerticalAlign, page.id)}
-                ${renderPreviewTextScaleToolbarCompact(page.fontScale, page.id)}
-              </div>
-              <div class="page-preview-image-actions">
-                <button
-                  class="ghost-button icon-button"
-                  type="button"
-                  data-generate-page-id="${escapeHtml(page.id)}"
-                  aria-label="Generate illustration"
-                  title="Generate illustration"
-                  ${isGeneratingPage ? "disabled" : ""}
-                >
-                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 3l1.8 4.6L18 9.5l-4.2 1.4L12 15l-1.8-4.1L6 9.5l4.2-1.9L12 3zM5 16l1 2.2L8 19l-2 .8L5 22l-1-2.2L2 19l2-.8L5 16zm14-2l1.3 3 3 .7-3 .8-1.2 3-1.2-3-3-.8 3-.7 1.1-3z" fill="currentColor"/>
-                  </svg>
-                </button>
-                <a
-                  class="ghost-button icon-button${page.imageUrl ? "" : " is-disabled"}"
-                  href="${page.imageUrl || "#"}"
-                  download="${escapeHtml(page.fileName || `page-${page.number}-scene.png`)}"
-                  ${page.imageUrl ? "" : 'aria-disabled="true" tabindex="-1"'}
-                  aria-label="Download page image"
-                  title="Download page image"
-                >
-                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 3v11M8 10l4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-                  </svg>
-                </a>
-                <label class="ghost-button icon-button file-button" aria-label="Upload image to this page" title="Upload image to this page">
-                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 21V11m0 0l4 4m-4-4-4 4M5 5h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
-                  </svg>
-                  <input type="file" accept="image/*" data-page-upload-input="true" data-page-id="${escapeHtml(page.id)}" />
-                </label>
-                <button
-                  class="ghost-button icon-button"
-                  type="button"
-                  data-clear-page-image-id="${escapeHtml(page.id)}"
-                  aria-label="Clear page image"
-                  title="Clear page image"
-                >
-                  <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 7h16M9 7V5h6v2m-7 0 1 12h6l1-12M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          `;
-          const body =
-            layoutMode(layout) === "spread"
-              ? `<div class="mini-spread">
-                  <div class="mini-spread-side">${layout === "spread-text-left" ? textMarkup : imageMarkup}</div>
-                  <div class="mini-spread-spine"></div>
-                  <div class="mini-spread-side">${layout === "spread-text-left" ? imageMarkup : textMarkup}</div>
-                </div>`
-              : layoutMode(layout) === "overlay"
-              ? `<div class="mini-overlay overlay-${layoutOverlayPosition(layout)}">
-                  ${imageMarkup}
-                  <div class="mini-overlay-text inline-page-text-editor${text ? "" : " is-empty"}" ${textEditorAttrs} style="${overlayTextStyle}">${text ? escapeHtml(text) : ""}</div>
-                </div>`
-              : layout === "stacked-text-top"
-              ? `<div class="mini-stack">${textMarkup}${imageMarkup}</div>`
-              : `<div class="mini-stack">${imageMarkup}${textMarkup}</div>`;
-          const imageControls = `
-            <div class="page-image-controls" data-page-id="${escapeHtml(page.id)}">
-              <div class="page-image-controls-row page-image-adjust-row">
-                <div class="page-image-nudge-group">
-                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up"${page.imageUrl ? "" : " disabled"}>&#8593;</button>
-                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left"${page.imageUrl ? "" : " disabled"}>&#8592;</button>
-                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image"${page.imageUrl ? "" : " disabled"}>&#10226;</button>
-                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right"${page.imageUrl ? "" : " disabled"}>&#8594;</button>
-                  <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down"${page.imageUrl ? "" : " disabled"}>&#8595;</button>
-                </div>
-                <div class="page-image-scale-group">
-                  <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller"${page.imageUrl ? "" : " disabled"}>&#8722;</button>
-                  <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger"${page.imageUrl ? "" : " disabled"}>+</button>
-                </div>
-              </div>
-            </div>
-          `;
-          return `
-            <article class="full-book-page" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
-              <header class="full-book-page-head">
-                <strong>Page ${page.number}</strong>
-                <button class="ghost-button small-button" type="button" data-edit-page-id="${page.id}">Edit</button>
-              </header>
-              ${previewToolbar}
-              ${body}
-              ${imageControls}
-            </article>
-          `;
-        })
-        .join("")}
+      ${spreadRows.join("")}
     </div>
   `;
 }
@@ -1490,6 +1775,11 @@ function updatePageById(pageId, values) {
   const page = book.pages.find((item) => item.id === pageId);
   if (!page) return;
   Object.assign(page, values);
+  if (layoutMode(page.layout) === "overlay") {
+    page.textSpace = resolvedTextSpaceForPage(page);
+  } else {
+    page.textSpace = "";
+  }
   book.activePageId = pageId;
   touchActiveBook();
   saveState();
@@ -1566,6 +1856,7 @@ function duplicatePage() {
     layout: source.layout,
     fontPreset: source.fontPreset,
     fontScale: source.fontScale,
+    textHorizontalAlign: source.textHorizontalAlign,
     textVerticalAlign: source.textVerticalAlign,
     imageScale: source.imageScale,
     imageOffsetX: source.imageOffsetX,
@@ -1599,12 +1890,13 @@ function deletePage() {
 async function generatePageForId(pageId) {
   const book = activeBook();
   const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const resolvedTextSpace = promptTextSpaceForPage(page);
   if (!page.sceneDescription.trim() && !page.text.trim()) {
     setStatus("Missing page", "Add page text or illustration direction before generating.");
     return;
   }
 
-  const approved = window.confirm("We will be charged 0.01 cent to generate this illustration. Continue?");
+  const approved = window.confirm("We will be charged 6 cents to generate this illustration. Continue?");
   if (!approved) {
     setStatus("Generation canceled", "No image was generated.");
     return;
@@ -1621,7 +1913,9 @@ async function generatePageForId(pageId) {
     setting: page.setting,
     mood: page.mood,
     lighting: page.lighting,
-    text_space: page.textSpace,
+    text_space: resolvedTextSpace,
+    text_horizontal_align: page.textHorizontalAlign,
+    text_vertical_align: page.textVerticalAlign,
     composition: page.composition,
     layout: page.layout,
     print_size: book.printSize,
@@ -1665,7 +1959,7 @@ async function generatePageForId(pageId) {
       imageScale: 1,
       imageOffsetX: DEFAULT_IMAGE_OFFSET,
       imageOffsetY: DEFAULT_IMAGE_OFFSET,
-      prompt: result.prompt,
+      prompt: replacePromptTextArea(result.prompt, resolvedTextSpace),
       notes: [
         `Model: ${result.model}`,
         `Output: ${result.file_name}`,
@@ -1687,6 +1981,80 @@ async function generatePageForId(pageId) {
   }
 }
 
+async function updatePagePrompt(pageId = activePage().id) {
+  const book = activeBook();
+  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const resolvedTextSpace = promptTextSpaceForPage(page);
+  if (page.textSpace !== resolvedTextSpace) {
+    page.textSpace = resolvedTextSpace;
+  }
+  const payload = {
+    project_title: book.projectTitle,
+    page_number: String(page.number),
+    page_text: page.text,
+    scene_description: page.sceneDescription || page.text,
+    setting: page.setting,
+    mood: page.mood,
+    lighting: page.lighting,
+    text_space: resolvedTextSpace,
+    text_horizontal_align: page.textHorizontalAlign,
+    text_vertical_align: page.textVerticalAlign,
+    composition: page.composition,
+    layout: page.layout,
+    print_size: book.printSize,
+    characters: mergeCharacterNames(inferCharacters(page.text), page.characters),
+    character_profiles: mergeCharacterNames(inferCharacters(page.text), page.characters)
+      .map((name) => state.characters.find((character) => character.name === name))
+      .filter(Boolean)
+      .map((character) => ({
+        name: character.name,
+        role: character.role,
+        visualTraits: character.visualTraits,
+        birthState: character.birthState,
+        distinctiveAnatomy: character.distinctiveAnatomy,
+        expressionPose: character.expressionPose,
+        styleNotes: character.styleNotes,
+        personality: character.personality,
+        groupIdentity: character.groupIdentity,
+        familyNotes: character.familyNotes,
+      })),
+    cover_data_url: book.coverReferenceUrl || book.coverPreviewUrl || "",
+  };
+
+  refs.updatePromptButton.disabled = true;
+  refs.updatePromptButton.classList.add("is-loading");
+  refs.updatePromptButton.textContent = "Updating...";
+  refs.updatePromptButton.setAttribute("aria-busy", "true");
+  setStatus("Updating prompt", `Refreshing the prompt for page ${page.number}.`);
+
+  try {
+    const response = await fetch("/api/generate-page-prompt", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Prompt update failed.");
+    }
+
+    page.prompt = replacePromptTextArea(result.prompt, resolvedTextSpace);
+    touchActiveBook();
+    saveState();
+    setStatus("Prompt updated", `Page ${page.number} prompt refreshed.`);
+    render();
+  } catch (error) {
+    setStatus("Update failed", error.message || "Could not update the prompt.");
+  } finally {
+    refs.updatePromptButton.disabled = false;
+    refs.updatePromptButton.classList.remove("is-loading");
+    refs.updatePromptButton.textContent = "Update prompt";
+    refs.updatePromptButton.removeAttribute("aria-busy");
+  }
+}
+
 async function publishBook() {
   const book = activeBook();
   if (!book.pages.length) {
@@ -1696,6 +2064,12 @@ async function publishBook() {
 
   saveState();
   bookPublishing = true;
+  if (refs.publishBookButton) {
+    refs.publishBookButton.disabled = true;
+    refs.publishBookButton.textContent = "Publishing...";
+    refs.publishBookButton.classList.add("is-loading");
+    refs.publishBookButton.setAttribute("aria-busy", "true");
+  }
   setStatus("Publishing book", "Building a PDF from the current pages and layouts.");
   renderBookPreview();
 
@@ -1720,6 +2094,12 @@ async function publishBook() {
     setStatus("Publish failed", error.message || "Could not create the PDF.");
   } finally {
     bookPublishing = false;
+    if (refs.publishBookButton) {
+      refs.publishBookButton.disabled = !book.pages.length;
+      refs.publishBookButton.textContent = "Publish";
+      refs.publishBookButton.classList.remove("is-loading");
+      refs.publishBookButton.removeAttribute("aria-busy");
+    }
     renderBookPreview();
   }
 }
@@ -1840,12 +2220,12 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     role: draft.role || "",
     isGroupReference: Boolean(draft.isGroupReference),
     groupMembers: Array.isArray(draft.groupMembers) ? draft.groupMembers : splitNames(String(draft.groupMembers || "")),
-    visualTraits: draft.visualTraits || "",
-    birthState: draft.birthState || "",
-    distinctiveAnatomy: draft.distinctiveAnatomy || "",
+    visualTraits: draft.isGroupReference ? "" : (draft.visualTraits || ""),
+    birthState: draft.isGroupReference ? "" : (draft.birthState || ""),
+    distinctiveAnatomy: draft.isGroupReference ? "" : (draft.distinctiveAnatomy || ""),
     expressionPose: draft.expressionPose || "",
     styleNotes: draft.styleNotes || "",
-    personality: draft.personality || "",
+    personality: draft.isGroupReference ? "" : (draft.personality || ""),
     groupIdentity: draft.groupIdentity || "",
     familyNotes: draft.familyNotes || "",
     seed_image_data_url: draft.seedImageDataUrl || "",
@@ -1859,12 +2239,12 @@ async function saveCharacterDraft({ generateThumbnail = false } = {}) {
     payload.character_role = draft.role || "";
     payload.isGroupReference = Boolean(draft.isGroupReference);
     payload.groupMembers = Array.isArray(draft.groupMembers) ? draft.groupMembers : splitNames(String(draft.groupMembers || ""));
-    payload.visual_traits = draft.visualTraits || "";
-    payload.birth_state = draft.birthState || "";
-    payload.distinctive_anatomy = draft.distinctiveAnatomy || "";
+    payload.visual_traits = draft.isGroupReference ? "" : (draft.visualTraits || "");
+    payload.birth_state = draft.isGroupReference ? "" : (draft.birthState || "");
+    payload.distinctive_anatomy = draft.isGroupReference ? "" : (draft.distinctiveAnatomy || "");
     payload.expression_pose = draft.expressionPose || "";
     payload.style_notes = draft.styleNotes || "";
-    payload.personality = draft.personality || "";
+    payload.personality = draft.isGroupReference ? "" : (draft.personality || "");
     payload.group_identity = draft.groupIdentity || "";
     payload.family_notes = draft.familyNotes || "";
     payload.cover_data_url = book.coverReferenceUrl || book.coverPreviewUrl || "";
@@ -2137,16 +2517,15 @@ function buildPagesFromStory() {
 
 function pagesFromTextBlocks(book, pageTexts) {
   return pageTexts.map((text, index) => {
-    const page = defaultPage(index + 1);
+    const page = defaultPage(index + 1, defaultLayoutForAudience(book.audience));
     page.text = text;
     page.characters = inferCharacters(text);
     page.sceneDescription = buildSceneDirection(text, page.characters, book.audience);
     page.setting = "Use the story context to choose the clearest setting for this moment.";
     page.mood = inferMood(text);
     page.lighting = audienceLighting(book.audience);
-    page.textSpace = audienceTextSpace(book.audience);
+    page.textSpace = defaultTextSpaceForLayout(page.layout);
     page.composition = audienceComposition(book.audience);
-    page.layout = defaultLayoutForAudience(book.audience);
     return page;
   });
 }
@@ -2340,6 +2719,30 @@ function normalizeInlinePageText(value) {
     .trim();
 }
 
+function replacePromptTextArea(prompt, textSpace) {
+  const normalizedPrompt = String(prompt ?? "").trim();
+  const resolvedTextSpace = String(textSpace ?? "").trim();
+  if (!normalizedPrompt) return resolvedTextSpace ? `Text area: ${resolvedTextSpace}.` : "";
+  const lines = normalizedPrompt.split("\n");
+  const index = lines.findIndex((line) => /^Text area:/i.test(line.trim()));
+  if (!resolvedTextSpace) {
+    if (index >= 0) {
+      lines.splice(index, 1);
+    }
+    return lines.join("\n").trim();
+  }
+  const replacement = `Text area: ${resolvedTextSpace}.`;
+  if (index >= 0) {
+    lines[index] = replacement;
+    return lines.join("\n");
+  }
+  return `${normalizedPrompt}\n${replacement}`;
+}
+
+function promptTextSpaceForPage(page) {
+  return resolvedTextSpaceForPage(page);
+}
+
 
 refs.newBookButton.addEventListener("click", openStartBookFlow);
 refs.cancelStartBookButton.addEventListener("click", closeStartBookFlow);
@@ -2425,13 +2828,12 @@ refs.pageForm.addEventListener("input", (event) => {
   updateActivePage({ [key]: event.target.value });
 });
 
+refs.publishBookButton.addEventListener("click", () => {
+  publishBook();
+});
+
 refs.fullBookPreview.addEventListener("click", (event) => {
   const pageId = event.target.closest(".full-book-page")?.dataset.pageId || activePage().id;
-  const publishButton = event.target.closest("[data-publish-book]");
-  if (publishButton) {
-    publishBook();
-    return;
-  }
   const generateButton = event.target.closest("[data-generate-page-id]");
   if (generateButton) {
     generatePageForId(generateButton.dataset.generatePageId);
@@ -2444,7 +2846,9 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   }
   const layoutButton = event.target.closest("[data-layout-choice]");
   if (layoutButton) {
-    updatePageById(pageId, { layout: layoutButton.dataset.layoutChoice });
+    const nextLayout = normalizeLayout(layoutButton.dataset.layoutChoice);
+    const nextValues = { layout: nextLayout, textSpace: defaultTextSpaceForLayout(nextLayout) };
+    updatePageById(pageId, nextValues);
     render();
     return;
   }
@@ -2456,7 +2860,17 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   }
   const verticalButton = event.target.closest("[data-text-vertical-choice]");
   if (verticalButton) {
-    updatePageById(pageId, { textVerticalAlign: verticalButton.dataset.textVerticalChoice });
+    const page = activeBook().pages.find((item) => item.id === pageId) || activePage();
+    const nextVertical = verticalButton.dataset.textVerticalChoice;
+    updatePageById(pageId, { textVerticalAlign: nextVertical });
+    render();
+    return;
+  }
+  const horizontalButton = event.target.closest("[data-text-horizontal-choice]");
+  if (horizontalButton) {
+    const page = activeBook().pages.find((item) => item.id === pageId) || activePage();
+    const nextHorizontal = horizontalButton.dataset.textHorizontalChoice;
+    updatePageById(pageId, { textHorizontalAlign: nextHorizontal });
     render();
     return;
   }
@@ -2644,8 +3058,14 @@ refs.characterEditor.addEventListener("change", (event) => {
   characterDraft.isGroupReference = Boolean(event.target.checked);
   if (!characterDraft.isGroupReference) {
     characterDraft.groupMembers = Array.isArray(characterDraft.groupMembers) ? characterDraft.groupMembers : splitNames(String(characterDraft.groupMembers || ""));
+  } else {
+    characterDraft.visualTraits = "";
+    characterDraft.birthState = "";
+    characterDraft.distinctiveAnatomy = "";
+    characterDraft.personality = "";
   }
   syncCharacterEditorChrome(characterDraft.seedImageDataUrl || characterDraft.thumbnailUrl || characterDraft.seedImageUrl || "");
+  renderCharacterEditor();
 });
 
 refs.characterSeedInput.addEventListener("change", async (event) => {
@@ -2723,6 +3143,10 @@ refs.copyPromptButton.addEventListener("click", async () => {
   } catch {
     setStatus("Copy failed", "Your browser blocked clipboard access.");
   }
+});
+
+refs.updatePromptButton.addEventListener("click", () => {
+  void updatePagePrompt();
 });
 
 async function bootstrap() {

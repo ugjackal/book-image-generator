@@ -107,6 +107,9 @@
                 <p class="eyebrow">Book</p>
                 <h2>Details</h2>
               </div>
+              <div class="section-head-actions">
+                <button class="primary-button" id="publishBookButton" type="button">Publish</button>
+              </div>
             </div>
 
             <label class="field">
@@ -262,7 +265,10 @@
               <textarea id="promptOutput" rows="10" readonly></textarea>
             </label>
 
-            <button class="ghost-button full-width" id="copyPromptButton" type="button" disabled>Copy prompt</button>
+            <div class="prompt-actions">
+              <button class="ghost-button" id="updatePromptButton" type="button">Update prompt</button>
+              <button class="ghost-button" id="copyPromptButton" type="button" disabled>Copy prompt</button>
+            </div>
           </section>
 
           <section class="editor-card character-card">

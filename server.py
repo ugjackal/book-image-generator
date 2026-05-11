@@ -28,6 +28,10 @@ STATE_FILE = BASE_DIR / "data" / "studio-state.json"
 STATE_LOCK = threading.Lock()
 DEFAULT_MODEL = os.environ.get("OPENAI_TEXT_MODEL", "gpt-5.4")
 CHARACTER_DIR = BASE_DIR / "characters"
+IMAGE_QUALITY = "medium"
+CHARACTER_IMAGE_QUALITY = "low"
+CHARACTER_AVATAR_SIZE = "1024x1024"
+DEFAULT_TEXT_SPACE = "Leave a calm open area for real page text"
 try:
     PIL_LANCZOS = Image.Resampling.LANCZOS
 except AttributeError:
@@ -196,6 +200,11 @@ def save_character_profile(payload: dict[str, Any], *, thumbnail_url: str = "") 
         "createdAt": existing_profile.get("createdAt") or payload.get("createdAt") or payload.get("created_at") or "",
         "updatedAt": "",
     }
+    if profile["isGroupReference"]:
+        profile["visualTraits"] = ""
+        profile["birthState"] = ""
+        profile["distinctiveAnatomy"] = ""
+        profile["personality"] = ""
     now = datetime.now(timezone.utc).isoformat()
     if not profile["createdAt"]:
         profile["createdAt"] = now
@@ -260,6 +269,11 @@ def build_prompt(payload: dict[str, Any]) -> str:
     group_identity = str(payload.get("group_identity", "")).strip() or str(character_profile.get("groupIdentity", "")).strip()
     family_notes = str(payload.get("family_notes", "")).strip() or str(character_profile.get("familyNotes", "")).strip()
     is_group_reference = parse_bool(payload.get("isGroupReference") or payload.get("is_group_reference") or character_profile.get("isGroupReference", False))
+    if is_group_reference:
+        visual_traits = ""
+        birth_state = ""
+        distinctive_anatomy = ""
+        personality = ""
     cover_story_notes = str(payload.get("cover_story_notes", "")).strip()
     prompt_seed = str(payload.get("prompt_seed", "")).strip()
     seed_image_reference = str(
@@ -312,6 +326,30 @@ def build_prompt(payload: dict[str, Any]) -> str:
         if group_members:
             lines.append(f"Group avatar members: {', '.join(group_members)}.")
         lines.append("Do not collapse the group into one person; show the collection as the canonical avatar for the family or group.")
+        member_profiles: list[dict[str, Any]] = []
+        for member_name in group_members:
+            member_profile = load_character_profile(member_name)
+            if member_profile:
+                member_profiles.append(member_profile)
+        if member_profiles:
+            lines.append("Group member visual references:")
+            aggregate_traits: list[str] = []
+            for member_profile in member_profiles:
+                member_lines = [f"- {member_profile.get('name', 'Unnamed member')}"]
+                member_visual_traits = str(member_profile.get("visualTraits", "")).strip()
+                member_birth_state = str(member_profile.get("birthState", "")).strip()
+                member_distinctive_anatomy = str(member_profile.get("distinctiveAnatomy", "")).strip()
+                if member_visual_traits:
+                    aggregate_traits.append(f"{member_profile.get('name', 'Unnamed member')}: {member_visual_traits}")
+                if member_visual_traits:
+                    member_lines.append(f"visual traits: {member_visual_traits}")
+                if member_birth_state:
+                    member_lines.append(f"birth state: {member_birth_state}")
+                if member_distinctive_anatomy:
+                    member_lines.append(f"distinctive anatomy: {member_distinctive_anatomy}")
+                lines.append("; ".join(member_lines) + ".")
+            if aggregate_traits:
+                lines.append("Synthesized group visual traits from members: " + " | ".join(aggregate_traits) + ".")
     if cover_story_notes:
         lines.append(f"Cover story notes: {cover_story_notes}.")
     if prompt_seed:
@@ -471,6 +509,10 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
             "isGroupReference": parse_bool(profile.get("isGroupReference", False)),
             "groupMembers": parse_name_list(profile.get("groupMembers", [])),
         }
+        if normalized_profile["isGroupReference"]:
+            normalized_profile["visualTraits"] = ""
+            normalized_profile["birthState"] = ""
+            normalized_profile["distinctiveAnatomy"] = ""
         name_key = profile_key(normalized_profile)
         if not normalized_profile["name"] or name_key in seen_profiles:
             return
@@ -516,11 +558,14 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
         lines.append(f"Lighting: {lighting}.")
     if composition:
         lines.append(f"Composition: {composition}.")
-    if text_space:
-        lines.append(f"Text area: {text_space}.")
-    else:
-        lines.append("Text area: leave a calm open area for real page text.")
-    if layout:
+    layout_value = str(layout).strip()
+    text_space_value = str(text_space).strip()
+    overlay_layout = layout_value.startswith("overlay")
+    if overlay_layout:
+        text_area_value = text_space_value if text_space_value and not is_auto_text_space_value(text_space_value) else default_text_space_for_layout(layout)
+        if text_area_value:
+            lines.append(f"Text area: {text_area_value}.")
+    if overlay_layout:
         layout_label = layout_title(layout)
         layout_instruction = layout_guidance(layout)
         if layout_label:
@@ -599,9 +644,12 @@ def layout_title(layout: str) -> str:
         "stacked-text-top": "Text top, image bottom",
         "spread-text-left": "Text left, image right",
         "spread-image-left": "Image left, text right",
-        "overlay-centered": "Background image, centered text",
-        "overlay-top": "Background image, top text",
-        "overlay-bottom": "Background image, bottom text",
+        "overlay": "Text on background, centered",
+        "overlay-centered": "Text on background, centered",
+        "overlay-left": "Text on background, left",
+        "overlay-right": "Text on background, right",
+        "overlay-top": "Text on background, top",
+        "overlay-bottom": "Text on background, bottom",
     }
     return titles.get(normalized, "")
 
@@ -613,9 +661,12 @@ def layout_guidance(layout: str) -> str:
         "stacked-text-top": "Compose the illustration with a quiet text-safe area above and the main art below.",
         "spread-text-left": "Compose as a wide two-page spread with calmer negative space on the left and the main action on the right.",
         "spread-image-left": "Compose as a wide two-page spread with the main action on the left and calmer negative space on the right.",
-        "overlay-centered": "Create a full-bleed background image with a soft, readable center area where text can sit over the art.",
-        "overlay-top": "Create a full-bleed background image with a calmer upper area for text overlay.",
-        "overlay-bottom": "Create a full-bleed background image with a calmer lower area for text overlay.",
+        "overlay": "Create a full-bleed background image with a calm, readable open area in the center where text can sit over the art.",
+        "overlay-centered": "Create a full-bleed background image with a calm, readable open area in the center where text can sit over the art.",
+        "overlay-left": "Create a full-bleed background image with a calm, readable open area on the left where text can sit over the art.",
+        "overlay-right": "Create a full-bleed background image with a calm, readable open area on the right where text can sit over the art.",
+        "overlay-top": "Create a full-bleed background image with a calm, readable open area at the top where text can sit over the art.",
+        "overlay-bottom": "Create a full-bleed background image with a calm, readable open area at the bottom where text can sit over the art.",
     }
     return guidance.get(normalized, "")
 
@@ -627,11 +678,71 @@ def layout_padding_guidance(layout: str) -> str:
         "stacked-text-top": "Keep the main art low in the frame and leave generous quiet space above it, with extra breathing room around every edge in case the page crop shifts later.",
         "spread-text-left": "Compose with the art anchored on the right side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
         "spread-image-left": "Compose with the art anchored on the left side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
-        "overlay-centered": "Keep the focal art large but surrounded by a generous full-bleed safety zone so text placement and later cropping still have room to breathe.",
-        "overlay-top": "Keep the focal art slightly lower than center and leave generous open space above, with wide outer margins for future repositioning.",
-        "overlay-bottom": "Keep the focal art slightly higher than center and leave generous open space below, with wide outer margins for future repositioning.",
+        "overlay": "Keep the focal art large but surround it with extra breathing room so a centered text block can be placed cleanly on top without crowding important details.",
+        "overlay-centered": "Keep the focal art large but surround it with extra breathing room so a centered text block can be placed cleanly on top without crowding important details.",
+        "overlay-left": "Keep the focal art large but surround it with extra breathing room so a left-side text block can be placed cleanly on top without crowding important details.",
+        "overlay-right": "Keep the focal art large but surround it with extra breathing room so a right-side text block can be placed cleanly on top without crowding important details.",
+        "overlay-top": "Keep the focal art large but surround it with extra breathing room so a top text block can be placed cleanly on top without crowding important details.",
+        "overlay-bottom": "Keep the focal art large but surround it with extra breathing room so a bottom text block can be placed cleanly on top without crowding important details.",
     }
     return guidance.get(normalized, "")
+
+
+def default_text_space_for_layout(layout: str) -> str:
+    normalized = str(layout).strip()
+    defaults = {
+        "overlay": "centered",
+        "overlay-centered": "centered",
+        "overlay-left": "left",
+        "overlay-right": "right",
+        "overlay-top": "top",
+        "overlay-bottom": "bottom",
+    }
+    return defaults.get(normalized, "")
+
+
+def is_auto_text_space_value(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized in {
+        "leave a calm open area for real page text",
+        "leave quiet open space where the page text can sit clearly.",
+        "leave a quiet open area at the top left for the story text.",
+        "place the story text below the image.",
+        "place the story text above the image.",
+        "place the story text on the left page.",
+        "place the story text on the right page.",
+        "upper left",
+        "upper center",
+        "upper right",
+        "centered",
+        "left",
+        "right",
+        "lower left",
+        "lower center",
+        "lower right",
+        "left",
+        "right",
+        "top",
+        "bottom",
+    }
+
+
+def text_area_from_alignment(horizontal: str, vertical: str) -> str:
+    h = str(horizontal or "").strip().lower()
+    v = str(vertical or "").strip().lower()
+    if h == "center" and v == "center":
+        return "centered"
+    if h == "left" and v == "center":
+        return "left"
+    if h == "right" and v == "center":
+        return "right"
+    if h == "center" and v == "top":
+        return "top"
+    if h == "center" and v == "bottom":
+        return "bottom"
+    vertical_word = "upper" if v == "top" else "lower" if v == "bottom" else "center"
+    horizontal_word = h if h in {"left", "right"} else "center"
+    return f"{vertical_word} {horizontal_word}".strip()
 
 
 def print_size_padding_guidance(print_size: str) -> str:
@@ -787,6 +898,18 @@ def layout_side_order(layout: str) -> tuple[str, str]:
     if normalized == "spread-text-left":
         return "text", "image"
     return "image", "text"
+
+
+def overlay_text_area_for_layout(layout: str) -> str:
+    normalized = str(layout or "").strip()
+    areas = {
+        "overlay-centered": "centered",
+        "overlay-left": "left",
+        "overlay-right": "right",
+        "overlay-top": "top",
+        "overlay-bottom": "bottom",
+    }
+    return areas.get(normalized, "centered")
 
 
 def render_wrapped_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list[str]:
@@ -1125,14 +1248,29 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         paste_fitted_image(canvas, image, (0, 0, page_w, page_h), scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fill=image_fill)
         if image is None:
             draw_placeholder(canvas, (0, 0, page_w, page_h))
-        overlay_w = max(360, int(page_w * 0.54))
-        overlay_h = max(170, int(page_h * 0.26))
-        overlay_x = int((page_w - overlay_w) / 2)
-        if text_align == "top":
+        overlay_layout = layout if layout.startswith("overlay") else "overlay-centered"
+        if overlay_layout in {"overlay-left", "overlay-right"}:
+            overlay_w = max(300, int(page_w * 0.34))
+            overlay_h = max(180, int(page_h * 0.28))
+            overlay_y = int((page_h - overlay_h) / 2)
+            if overlay_layout == "overlay-left":
+                overlay_x = outer_margin_x
+            else:
+                overlay_x = page_w - outer_margin_x - overlay_w
+        elif overlay_layout == "overlay-top":
+            overlay_w = max(360, int(page_w * 0.56))
+            overlay_h = max(150, int(page_h * 0.2))
+            overlay_x = int((page_w - overlay_w) / 2)
             overlay_y = outer_margin_y
-        elif text_align == "bottom":
+        elif overlay_layout == "overlay-bottom":
+            overlay_w = max(360, int(page_w * 0.56))
+            overlay_h = max(150, int(page_h * 0.2))
+            overlay_x = int((page_w - overlay_w) / 2)
             overlay_y = page_h - outer_margin_y - overlay_h
         else:
+            overlay_w = max(360, int(page_w * 0.54))
+            overlay_h = max(170, int(page_h * 0.26))
+            overlay_x = int((page_w - overlay_w) / 2)
             overlay_y = int((page_h - overlay_h) / 2)
         overlay = Image.new("RGBA", (overlay_w, overlay_h), (255, 252, 248, 0))
         overlay_draw = ImageDraw.Draw(overlay)
@@ -1149,8 +1287,20 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         if text:
             _, text_height = text_block_metrics(overlay_draw, lines, font, spacing)
             y = max(18, int((overlay_h - text_height) / 2))
+            if overlay_layout == "overlay-top":
+                y = 16
+            elif overlay_layout == "overlay-bottom":
+                y = max(16, overlay_h - text_height - 16)
             for line in lines:
-                overlay_draw.text((24, y), line, font=font, fill=(58, 42, 31, 255))
+                x = 24
+                if overlay_layout == "overlay-right":
+                    x = 20
+                    bbox = overlay_draw.textbbox((0, 0), line or " ", font=font)
+                    line_width = bbox[2] - bbox[0]
+                    x = max(20, overlay_w - 20 - line_width)
+                elif overlay_layout == "overlay-top" or overlay_layout == "overlay-bottom" or overlay_layout == "overlay-centered":
+                    x = 24
+                overlay_draw.text((x, y), line, font=font, fill=(58, 42, 31, 255))
                 bbox = overlay_draw.textbbox((0, 0), line or " ", font=font)
                 y += (bbox[3] - bbox[1]) + spacing
         canvas.alpha_composite(overlay, (overlay_x, overlay_y))
@@ -1234,6 +1384,7 @@ def create_image(
     reference_data_urls: list[str] | None = None,
     background: str = "auto",
     size: str = "1536x1024",
+    quality: str = IMAGE_QUALITY,
 ) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -1268,7 +1419,7 @@ def create_image(
         "model": "gpt-image-2",
         "action": "generate",
         "background": background,
-        "quality": "high",
+        "quality": quality,
         "size": size,
         "output_format": "png",
     }
@@ -1321,7 +1472,8 @@ def generate_character_image(payload: dict[str, Any]) -> dict[str, Any]:
         cover_data_url=cover_data_url,
         reference_data_urls=[reference for reference in [seed_image_data_url] if reference and reference != cover_data_url],
         background="auto",
-        size="1024x1536",
+        size=CHARACTER_AVATAR_SIZE,
+        quality=CHARACTER_IMAGE_QUALITY,
     )
     if payload.get("save_profile") or payload.get("saveProfile"):
         profile_payload = dict(payload)
@@ -1388,6 +1540,9 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/generate-page-scene":
             self.handle_generate_page_scene()
+            return
+        if parsed.path == "/api/generate-page-prompt":
+            self.handle_generate_page_prompt()
             return
         if parsed.path == "/api/publish-book":
             self.handle_publish_book()
@@ -1550,6 +1705,34 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {
                     "error": f"OpenAI page scene generation failed: {message}",
+                },
+            )
+
+    def handle_generate_page_prompt(self) -> None:
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(content_length)
+            payload = json.loads(body.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"Invalid JSON payload: {exc}"},
+            )
+            return
+
+        try:
+            prompt = build_page_scene_prompt(payload)
+            self.send_json(
+                HTTPStatus.OK,
+                {
+                    "prompt": prompt,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.send_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {
+                    "error": f"Prompt generation failed: {exc}",
                 },
             )
 

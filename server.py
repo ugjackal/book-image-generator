@@ -7,6 +7,7 @@ import secrets
 import sys
 import mimetypes
 import threading
+import uuid
 from datetime import datetime
 from io import BytesIO
 from functools import partial
@@ -32,6 +33,7 @@ IMAGE_QUALITY = "medium"
 CHARACTER_IMAGE_QUALITY = "low"
 CHARACTER_AVATAR_SIZE = "1024x1024"
 DEFAULT_TEXT_SPACE = "Leave a calm open area for real page text"
+DEV_SERVER_VERSION = uuid.uuid4().hex
 try:
     PIL_LANCZOS = Image.Resampling.LANCZOS
 except AttributeError:
@@ -622,6 +624,7 @@ def print_size_label(print_size: str) -> str:
     labels = {
         "landscape-10x8": "Landscape picture book 12 x 8 in",
         "portrait-8x10": "Portrait picture book 8 x 12 in",
+        "portrait-8.5x11": "Portrait picture book 8.5 x 11 in",
         "square-10x10": "Square picture book 10 x 10 in",
     }
     return labels.get(normalized, "")
@@ -630,8 +633,20 @@ def print_size_label(print_size: str) -> str:
 def size_for_print_size(print_size: str) -> str:
     normalized = str(print_size).strip()
     sizes = {
+        "landscape-10x8": "3600x2400",
+        "portrait-8x10": "2400x3600",
+        "portrait-8.5x11": "2550x3300",
+        "square-10x10": "3000x3000",
+    }
+    return sizes.get(normalized, "3600x2400")
+
+
+def generation_size_for_print_size(print_size: str) -> str:
+    normalized = str(print_size).strip()
+    sizes = {
         "landscape-10x8": "1536x1024",
         "portrait-8x10": "1024x1536",
+        "portrait-8.5x11": "1024x1536",
         "square-10x10": "1024x1024",
     }
     return sizes.get(normalized, "1536x1024")
@@ -642,6 +657,8 @@ def layout_title(layout: str) -> str:
     titles = {
         "stacked-image-top": "Image top, text bottom",
         "stacked-text-top": "Text top, image bottom",
+        "single-overlay-top": "Single page: text over image, top",
+        "single-overlay-bottom": "Single page: text over image, bottom",
         "spread-text-left": "Text left, image right",
         "spread-image-left": "Image left, text right",
         "overlay": "Text on background, centered",
@@ -659,6 +676,8 @@ def layout_guidance(layout: str) -> str:
     guidance = {
         "stacked-image-top": "Compose the illustration with the main art above and a calm text-safe area below.",
         "stacked-text-top": "Compose the illustration with a quiet text-safe area above and the main art below.",
+        "single-overlay-top": "Compose one page as a full-bleed image with a calm, readable text-safe area at the top.",
+        "single-overlay-bottom": "Compose one page as a full-bleed image with a calm, readable text-safe area at the bottom.",
         "spread-text-left": "Compose as a wide two-page spread with calmer negative space on the left and the main action on the right.",
         "spread-image-left": "Compose as a wide two-page spread with the main action on the left and calmer negative space on the right.",
         "overlay": "Create a full-bleed background image with a calm, readable open area in the center where text can sit over the art.",
@@ -676,6 +695,8 @@ def layout_padding_guidance(layout: str) -> str:
     guidance = {
         "stacked-image-top": "Keep the main art high in the frame and leave generous quiet space beneath it, with extra breathing room around every edge in case the page crop shifts later.",
         "stacked-text-top": "Keep the main art low in the frame and leave generous quiet space above it, with extra breathing room around every edge in case the page crop shifts later.",
+        "single-overlay-top": "Keep the focal art within this single page and leave uncluttered breathing room at the top for a readable text panel.",
+        "single-overlay-bottom": "Keep the focal art within this single page and leave uncluttered breathing room at the bottom for a readable text panel.",
         "spread-text-left": "Compose with the art anchored on the right side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
         "spread-image-left": "Compose with the art anchored on the left side but give it extra surrounding context and wide outer margins so it can be moved or cropped without losing important details.",
         "overlay": "Keep the focal art large but surround it with extra breathing room so a centered text block can be placed cleanly on top without crowding important details.",
@@ -697,6 +718,8 @@ def default_text_space_for_layout(layout: str) -> str:
         "overlay-right": "right",
         "overlay-top": "top",
         "overlay-bottom": "bottom",
+        "single-overlay-top": "top",
+        "single-overlay-bottom": "bottom",
     }
     return defaults.get(normalized, "")
 
@@ -750,6 +773,7 @@ def print_size_padding_guidance(print_size: str) -> str:
     guidance = {
         "landscape-10x8": "Use a wide landscape canvas with expansive left and right bleed and no important detail pressed against the edges.",
         "portrait-8x10": "Use a tall portrait canvas with expansive top and bottom bleed and no important detail pressed against the edges.",
+        "portrait-8.5x11": "Use a tall 8.5 x 11 portrait page with generous top and bottom bleed and no important detail pressed against the edges.",
         "square-10x10": "Use a balanced square canvas with generous padding on all sides and no important detail pressed against the edges.",
     }
     return guidance.get(normalized, "")
@@ -884,7 +908,7 @@ def load_pdf_font(font_key: str, size: int) -> ImageFont.FreeTypeFont | ImageFon
 
 def normalize_layout_mode(layout: str) -> str:
     normalized = str(layout or "").strip()
-    if normalized.startswith("overlay"):
+    if normalized.startswith("overlay") or normalized.startswith("single-overlay"):
         return "overlay"
     if normalized.startswith("spread"):
         return "spread"
@@ -908,6 +932,8 @@ def overlay_text_area_for_layout(layout: str) -> str:
         "overlay-right": "right",
         "overlay-top": "top",
         "overlay-bottom": "bottom",
+        "single-overlay-top": "top",
+        "single-overlay-bottom": "bottom",
     }
     return areas.get(normalized, "centered")
 
@@ -1220,7 +1246,7 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
             draw_placeholder(canvas, image_box)
         text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), text_fill)
         region_draw = ImageDraw.Draw(text_region)
-        start_size = max(22, int((54 if book.get("audience") in {"3-5", "3-8"} else 42) * font_scale))
+        start_size = min(200, max(22, int((54 if book.get("audience") in {"3-5", "3-8"} else 42) * font_scale)))
         font, lines, spacing, total_height = fit_text_font(
             region_draw,
             text,
@@ -1248,7 +1274,10 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         paste_fitted_image(canvas, image, (0, 0, page_w, page_h), scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fill=image_fill)
         if image is None:
             draw_placeholder(canvas, (0, 0, page_w, page_h))
-        overlay_layout = layout if layout.startswith("overlay") else "overlay-centered"
+        overlay_layout = {
+            "single-overlay-top": "overlay-top",
+            "single-overlay-bottom": "overlay-bottom",
+        }.get(layout, layout if layout.startswith("overlay") else "overlay-centered")
         if overlay_layout in {"overlay-left", "overlay-right"}:
             overlay_w = max(300, int(page_w * 0.34))
             overlay_h = max(180, int(page_h * 0.28))
@@ -1275,7 +1304,7 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         overlay = Image.new("RGBA", (overlay_w, overlay_h), (255, 252, 248, 0))
         overlay_draw = ImageDraw.Draw(overlay)
         overlay_draw.rounded_rectangle((0, 0, overlay_w, overlay_h), radius=22, fill=(255, 253, 249, 212), outline=(229, 208, 189, 255), width=1)
-        start_size = max(22, int((50 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale))
+        start_size = min(200, max(22, int((50 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale)))
         font, lines, spacing, total_height = fit_text_font(
             overlay_draw,
             text,
@@ -1320,7 +1349,7 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
 
     text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), (0, 0, 0, 0))
     text_draw = ImageDraw.Draw(text_region)
-    start_size = max(22, int((52 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale))
+    start_size = min(200, max(22, int((52 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale)))
     font, lines, spacing, total_height = fit_text_font(
         text_draw,
         text,
@@ -1500,15 +1529,24 @@ def generate_page_scene_image(payload: dict[str, Any]) -> dict[str, Any]:
         file_prefix=prefix,
         cover_data_url=str(payload.get("cover_data_url") or "").strip(),
         background="auto",
-        size=size_for_print_size(str(payload.get("print_size", "")).strip()),
+        size=generation_size_for_print_size(str(payload.get("print_size", "")).strip()),
     )
 
 
 class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
     server_version = "CharacterPNGGenerator/1.0"
 
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/dev-version":
+            self.send_json(HTTPStatus.OK, {"version": DEV_SERVER_VERSION})
+            return
         if parsed.path == "/api/state":
             self.handle_get_state()
             return
@@ -1557,13 +1595,21 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"files": []})
             return
 
+        image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        output_paths = [
+            path
+            for folder in (OUTPUT_DIR, PAGE_OUTPUT_DIR)
+            if folder.exists()
+            for path in folder.iterdir()
+            if path.is_file() and path.suffix.lower() in image_extensions
+        ]
         files = [
             {
                 "name": path.name,
-                "url": f"/outputs/{path.name}",
+                "url": f"/{path.relative_to(BASE_DIR).as_posix()}",
                 "last_modified": path.stat().st_mtime,
             }
-            for path in sorted(OUTPUT_DIR.glob("*.png"), key=lambda item: item.stat().st_mtime)
+            for path in sorted(output_paths, key=lambda item: item.stat().st_mtime, reverse=True)
         ]
         self.send_json(HTTPStatus.OK, {"files": files})
 
@@ -1768,7 +1814,7 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     load_env_file(BASE_DIR / ".env")
     handler = partial(CharacterGeneratorHandler, directory=str(BASE_DIR))
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8001"))
     host = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("HOST", "127.0.0.1")
     server = ThreadingHTTPServer((host, port), handler)
     display_host = "127.0.0.1" if host in {"0.0.0.0", ""} else host

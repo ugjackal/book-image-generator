@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/whoka-favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="./assets/whoka-favicon-16.png" />
     <link rel="apple-touch-icon" href="./assets/whoka-apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=apply-font-all" />
   </head>
   <body>
     <main class="app-shell">
@@ -141,6 +141,7 @@
               <select id="printSizeSelect">
                 <option value="landscape-10x8">Landscape picture book 12 x 8 in</option>
                 <option value="portrait-8x10">Portrait picture book 8 x 12 in</option>
+                <option value="portrait-8.5x11">Portrait picture book 8.5 x 11 in</option>
                 <option value="square-10x10">Square picture book 10 x 10 in</option>
               </select>
             </label>
@@ -190,7 +191,7 @@
               </label>
 
               <label class="field">
-                <span>Page count</span>
+                <span id="pageCountLabel">Page count</span>
                 <input id="suggestedPageCount" type="number" min="1" max="64" placeholder="Auto" />
               </label>
 
@@ -375,6 +376,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=fixed-page-count"></script>
   </body>
 </html>

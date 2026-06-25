@@ -815,12 +815,12 @@
           "imageScale": 1,
           "imageOffsetX": 0,
           "imageOffsetY": 0,
-          "imageSource": "",
+          "imageSource": "generated",
           "imageDataUrl": "",
-          "imageUrl": "",
-          "fileName": "",
+          "imageUrl": "/outputs/ig_0278cffd2b06c6d3016a3c225ec5fc819b922e15756db9bf5a.png",
+          "fileName": "ig_0278cffd2b06c6d3016a3c225ec5fc819b922e15756db9bf5a.png",
           "prompt": "",
-          "notes": ""
+          "notes": "Loaded from the outputs folder."
         },
         {
           "id": "321d0137-4422-453c-bb59-70060cde3c0d",
@@ -833,7 +833,7 @@
           "lighting": "Warm natural light with enough contrast to support a richer illustrated scene.",
           "textSpace": "",
           "composition": "Balanced picture-book composition with clear action, expressive characters, and moderate detail.",
-          "layout": "stacked-image-top",
+          "layout": "stacked-text-top",
           "fontPreset": "storybook-serif",
           "fontScale": 2.9166666666666665,
           "textHorizontalAlign": "center",
@@ -1579,9 +1579,9 @@
           "notes": ""
         }
       ],
-      "activePageId": "8c0e621a-fe1b-437d-8564-0a5841c0ce84",
+      "activePageId": "321d0137-4422-453c-bb59-70060cde3c0d",
       "createdAt": "2026-05-08T18:39:54.243Z",
-      "updatedAt": "2026-06-25T04:55:43.095Z"
+      "updatedAt": "2026-06-25T04:56:50.809Z"
     }
   ],
   "activeBookId": "id-mox9f62r-0yits666byed",

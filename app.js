@@ -7,11 +7,12 @@ const DEFAULT_PAGE_TEXT_SCALE = 1;
 const DEFAULT_PAGE_TEXT_VERTICAL = "top";
 const DEFAULT_PAGE_TEXT_HORIZONTAL = "center";
 const DEFAULT_PAGE_TEXT_SPACE = "Leave a calm open area for real page text";
+const DEFAULT_IMAGE_SCALE = 1;
 const DEFAULT_IMAGE_OFFSET = 0;
 const IMAGE_OFFSET_MIN = -100;
 const IMAGE_OFFSET_MAX = 100;
 const IMAGE_NUDGE_STEP = 20;
-const IMAGE_MIN_PAN_SCALE = 1.12;
+const IMAGE_MIN_PAN_SCALE = 0.7;
 const PRINT_SIZES = {
   "landscape-10x8": { label: "Landscape picture book 12 x 8 in", width: 3600, height: 2400, aspect: 1.5 },
   "portrait-8x10": { label: "Portrait picture book 8 x 12 in", width: 2400, height: 3600, aspect: 0.6666667 },
@@ -171,6 +172,8 @@ const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
   imageScale: 1,
   imageOffsetX: DEFAULT_IMAGE_OFFSET,
   imageOffsetY: DEFAULT_IMAGE_OFFSET,
+  imageNaturalWidth: 0,
+  imageNaturalHeight: 0,
   imageSource: "",
   imageDataUrl: "",
   imageUrl: "",
@@ -452,6 +455,8 @@ function normalizeGeneratedImageLibrary(imageLibrary, pages = []) {
       notes: String(item?.notes || ""),
       sourcePageId: String(item?.sourcePageId || ""),
       sourcePageNumber: Number(item?.sourcePageNumber) || 0,
+      imageNaturalWidth: Number(item?.imageNaturalWidth) || 0,
+      imageNaturalHeight: Number(item?.imageNaturalHeight) || 0,
       createdAt: String(item?.createdAt || new Date().toISOString()),
     });
   };
@@ -468,6 +473,8 @@ function normalizeGeneratedImageLibrary(imageLibrary, pages = []) {
         notes: page.notes,
         sourcePageId: page.id,
         sourcePageNumber: page.number,
+        imageNaturalWidth: Number(page.imageNaturalWidth) || 0,
+        imageNaturalHeight: Number(page.imageNaturalHeight) || 0,
       }),
     );
   return normalized;
@@ -491,6 +498,8 @@ function normalizePages(pages) {
     ),
     imageOffsetX: normalizeImageOffset(page?.imageOffsetX),
     imageOffsetY: normalizeImageOffset(page?.imageOffsetY),
+    imageNaturalWidth: Number(page?.imageNaturalWidth) || 0,
+    imageNaturalHeight: Number(page?.imageNaturalHeight) || 0,
     textSpace: resolvedTextSpaceForPage(page),
   }));
 }
@@ -502,8 +511,8 @@ function normalizePrintSize(printSize) {
 
 function normalizeImageScale(scale) {
   const value = Number(scale);
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(2, Math.max(0.75, value));
+  if (!Number.isFinite(value)) return DEFAULT_IMAGE_SCALE;
+  return Math.min(2, Math.max(IMAGE_MIN_PAN_SCALE, value));
 }
 
 function normalizeImageOffset(offset) {
@@ -1823,6 +1832,45 @@ function renderFullBookPreview() {
 
 function renderBookPreview() {
   renderFullBookPreview();
+  syncMissingPageImageDimensions(activeBook());
+}
+
+const pendingImageDimensionLoads = new Set();
+
+function syncMissingPageImageDimensions(book) {
+  const pages = Array.isArray(book?.pages) ? book.pages : [];
+  pages
+    .filter((page) => page?.imageUrl && (!Number(page.imageNaturalWidth) || !Number(page.imageNaturalHeight)))
+    .forEach((page) => {
+      const key = `${page.id}:${page.imageUrl}`;
+      const resolvedPageUrl = (() => {
+        try {
+          return new URL(page.imageUrl, window.location.href).href;
+        } catch {
+          return String(page.imageUrl || "");
+        }
+      })();
+      if (pendingImageDimensionLoads.has(key)) return;
+      pendingImageDimensionLoads.add(key);
+      const image = new Image();
+      image.onload = () => {
+        pendingImageDimensionLoads.delete(key);
+        if (resolvedPageUrl !== image.src) return;
+        const nextWidth = image.naturalWidth || 0;
+        const nextHeight = image.naturalHeight || 0;
+        if (!nextWidth || !nextHeight) return;
+        if (page.imageNaturalWidth === nextWidth && page.imageNaturalHeight === nextHeight) return;
+        page.imageNaturalWidth = nextWidth;
+        page.imageNaturalHeight = nextHeight;
+        touchActiveBook();
+        saveState();
+        renderBookPreview();
+      };
+      image.onerror = () => {
+        pendingImageDimensionLoads.delete(key);
+      };
+      image.src = page.imageUrl;
+    });
 }
 
 function pagePreviewStyle(book, page) {
@@ -1830,10 +1878,32 @@ function pagePreviewStyle(book, page) {
 }
 
 function pageImageStyle(page) {
-  const imageScale = normalizeImageScale(page.imageScale);
+  const imageScale = Math.max(normalizeImageScale(page.imageScale), imageMinimumScale(page));
   const imageOffsetX = normalizeImageOffset(page.imageOffsetX);
   const imageOffsetY = normalizeImageOffset(page.imageOffsetY);
-  return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:${(imageScale * 100).toFixed(2)}%;height:${(imageScale * 100).toFixed(2)}%;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+  const naturalWidth = Number(page.imageNaturalWidth) || 0;
+  const naturalHeight = Number(page.imageNaturalHeight) || 0;
+  if (naturalWidth > 0 && naturalHeight > 0) {
+    const frameAspect = printSizeAspect(page.printSize);
+    const sourceAspect = naturalWidth / naturalHeight;
+    if (sourceAspect > frameAspect) {
+      return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:calc(100% * ${(sourceAspect / frameAspect) * imageScale});height:100%;max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+    }
+    return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:100%;height:calc(100% * ${(frameAspect / sourceAspect) * imageScale});max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+  }
+  return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:100%;height:100%;max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+}
+
+function imageMinimumScale(page) {
+  const naturalWidth = Number(page?.imageNaturalWidth) || 0;
+  const naturalHeight = Number(page?.imageNaturalHeight) || 0;
+  if (naturalWidth <= 0 || naturalHeight <= 0) return IMAGE_MIN_PAN_SCALE;
+  const frameAspect = printSizeAspect(page.printSize);
+  const sourceAspect = naturalWidth / naturalHeight;
+  if (sourceAspect > frameAspect) {
+    return Math.max(IMAGE_MIN_PAN_SCALE, frameAspect / sourceAspect);
+  }
+  return Math.max(IMAGE_MIN_PAN_SCALE, sourceAspect / frameAspect);
 }
 
 function renderPageImageMarkup(page, isGeneratingPage) {
@@ -1967,6 +2037,7 @@ function renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole =
   const overlayPlacement = overlayPlacementClassForLayout(page.layout);
   const imageMarkup = renderPageImageMarkup(page, isGeneratingPage);
   const textMarkup = renderPageTextMarkup(book, page);
+  const stackClass = layout === "stacked-text-top" ? "stack-text-top" : "stack-image-top";
   const body = spreadRole === "text"
       ? `<div class="mini-single-page mini-single-page-text">${textMarkup}</div>`
       : spreadRole === "image"
@@ -1983,10 +2054,10 @@ function renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole =
           ${renderPageTextMarkup(book, page, "mini-overlay-text")}
         </div>`
       : layout === "stacked-text-top"
-      ? `<div class="mini-stack">${textMarkup}${imageMarkup}</div>`
-      : `<div class="mini-stack">${imageMarkup}${textMarkup}</div>`;
+      ? `<div class="mini-stack ${stackClass}">${textMarkup}${imageMarkup}</div>`
+      : `<div class="mini-stack ${stackClass}">${imageMarkup}${textMarkup}</div>`;
   return `
-    <article class="full-book-page" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
+    <article class="full-book-page layout-${layout}" data-page-id="${escapeHtml(page.id)}" style="${pageStyle}">
       ${body}
     </article>
   `;
@@ -1996,10 +2067,33 @@ function selectedPreviewPages(book) {
   const validIds = selectedPreviewPageIds.filter((id) => book.pages.some((page) => page.id === id));
   if (!validIds.length) validIds.push(book.activePageId || book.pages[0]?.id);
   selectedPreviewPageIds = [...new Set(validIds.filter(Boolean))].slice(0, 2);
-  return selectedPreviewPageIds
+  let pages = selectedPreviewPageIds
     .map((id) => book.pages.find((page) => page.id === id))
     .filter(Boolean)
     .sort((a, b) => a.number - b.number);
+  if (pages.length === 2 && !areFacingPages(book, pages[0], pages[1])) {
+    pages = [pages.find((page) => page.id === book.activePageId) || pages[0]];
+    selectedPreviewPageIds = pages.map((page) => page.id);
+  }
+  return pages;
+}
+
+function areFacingPages(book, firstPage, secondPage) {
+  const firstIndex = book.pages.findIndex((page) => page.id === firstPage?.id);
+  const secondIndex = book.pages.findIndex((page) => page.id === secondPage?.id);
+  const leftIndex = Math.min(firstIndex, secondIndex);
+  const rightIndex = Math.max(firstIndex, secondIndex);
+  return leftIndex >= 0 && leftIndex % 2 === 0 && rightIndex === leftIndex + 1;
+}
+
+function resetTwoPageLayouts(pageIds) {
+  const book = activeBook();
+  pageIds.forEach((pageId) => {
+    const page = book.pages.find((item) => item.id === pageId);
+    if (!page || !TWO_PAGE_LAYOUT_OPTIONS.includes(normalizeLayout(page.layout))) return;
+    page.layout = DEFAULT_PAGE_LAYOUT;
+    page.textSpace = defaultTextSpaceForLayout(page.layout);
+  });
 }
 
 function renderContextualPreviewToolbar(book, pages) {
@@ -2046,8 +2140,8 @@ function renderContextualPreviewToolbar(book, pages) {
           <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down"${hasImage ? "" : " disabled"}>&#8595;</button>
         </div>
         <div class="page-image-scale-group">
-          <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.05" aria-label="Scale image smaller" title="Scale image smaller"${hasImage ? "" : " disabled"}>&#8722;</button>
-          <button class="ghost-button icon-button" type="button" data-image-scale-step="0.05" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
+          <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.12" aria-label="Scale image smaller" title="Scale image smaller"${hasImage ? "" : " disabled"}>&#8722;</button>
+          <button class="ghost-button icon-button" type="button" data-image-scale-step="0.12" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
         </div>
         ${renderGeneratedImagePicker(book, sourcePage)}
       </div>
@@ -2075,13 +2169,20 @@ function renderSelectedPairPreview(book, leftPage, rightPage, activeGeneratingPa
   const textPage = textSide === "right" && rightPage ? rightPage : leftPage;
   const imagePage = [leftPage, rightPage].find((page) => page?.imageUrl) || leftPage;
   const isGeneratingImage = [leftPage, rightPage].some((page) => page && activeGeneratingPageId === page.id);
+  const imageMarkup = imagePage.imageUrl || isGeneratingImage
+    ? renderPageImageMarkup(imagePage, isGeneratingImage)
+    : `<div class="page-art">
+        <div class="page-art-empty-state">
+          <span class="page-art-empty-state-label">Choose or generate one image in the toolbar for pages ${leftPage.number}-${rightPage.number}</span>
+        </div>
+      </div>`;
   const overlayPlacement = overlayPlacementClassForLayout(layout);
   const textPlacementClass = textSide === "right" ? "overlay-right" : layout === "overlay-right" ? "overlay-right" : "overlay-left";
   const previewStyle = `${pagePreviewStyle(book, textPage)}--page-image-scale:${normalizeImageScale(imagePage.imageScale)};--page-image-offset-x:${normalizeImageOffset(imagePage.imageOffsetX)};--page-image-offset-y:${normalizeImageOffset(imagePage.imageOffsetY)};`;
 
   return `
     <div class="selected-pair-preview full-book-spread-overlay-preview ${overlayPlacement} ${textPlacementClass}" style="${previewStyle}">
-      ${renderPageImageMarkup(imagePage, isGeneratingImage)}
+      ${imageMarkup}
       <div class="full-book-spread-spine" aria-hidden="true"></div>
       ${renderPageTextMarkup(book, textPage, "mini-overlay-text")}
     </div>
@@ -2092,57 +2193,68 @@ function renderFullBookPreviewMarkup(book) {
   const activeGeneratingPageId = state.isGenerating ? state.generatingPageId || activeBook().activePageId : "";
   const selectedPages = selectedPreviewPages(book);
   const selectedIds = new Set(selectedPages.map((page) => page.id));
-  const pairPreview = selectedPages.length === 2
-    ? renderSelectedPairPreview(book, selectedPages[0], selectedPages[1], activeGeneratingPageId)
-    : "";
-  const pageCards = book.pages.map((page) => {
+  const pageCards = [];
+  for (let pageIndex = 0; pageIndex < book.pages.length; pageIndex += 1) {
+    const page = book.pages[pageIndex];
+    const nextPage = book.pages[pageIndex + 1];
     const isFocused = page.id === book.activePageId;
     const isSelected = selectedIds.has(page.id);
-    let spreadRole = "";
-    if (selectedPages.length === 2 && isSelected) {
-      const pairLayout = normalizeLayout(selectedPages[0].layout);
-      if (layoutMode(pairLayout) === "spread") {
-        const isLeftPage = page.id === selectedPages[0].id;
-        spreadRole = pairLayout === "spread-text-left"
-          ? (isLeftPage ? "text" : "image")
-          : (isLeftPage ? "image" : "text");
-      } else if (layoutMode(pairLayout) === "overlay") {
-        const textPage = spreadTextSide(pairLayout) === "right" ? selectedPages[1] : selectedPages[0];
-        spreadRole = page.id === textPage.id ? "text" : "image";
-      }
-    }
-    return `
+    const isFacingPairStart = Boolean(nextPage) && page.number % 2 === 1 && nextPage.number === page.number + 1;
+    const pairIsLinked = isFacingPairStart
+      && selectedPages.length === 2
+      && selectedPages[0].id === page.id
+      && selectedPages[1].id === nextPage.id;
+    const pairLinkButton = isFacingPairStart
+      ? `
+        <button
+          class="page-pair-link-button${pairIsLinked ? " is-active" : ""}"
+          type="button"
+          data-link-preview-pages="${escapeHtml(`${page.id},${nextPage.id}`)}"
+          aria-pressed="${pairIsLinked}"
+          title="${pairIsLinked ? `Unlink pages ${page.number}-${nextPage.number}` : `Link pages ${page.number}-${nextPage.number}`}"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9.5 14.5l5-5M7.2 16.8l-1 1a3 3 0 0 1-4.2-4.2l3.1-3.1a3 3 0 0 1 4.2 0M16.8 7.2l1-1a3 3 0 1 1 4.2 4.2l-3.1 3.1a3 3 0 0 1-4.2 0" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+          </svg>
+          <span>${page.number}-${nextPage.number}</span>
+        </button>
+      `
+      : "";
+    const card = `
       <article
         class="page-slider-card${isFocused ? " is-focused" : ""}${isSelected ? " is-selected" : ""}"
         data-page-id="${escapeHtml(page.id)}"
       >
         <div class="page-slider-card-head">
-          <button
-            class="page-slider-card-focus"
-            type="button"
-            data-focus-preview-page="${escapeHtml(page.id)}"
-            aria-label="Focus page ${page.number}"
-          >
-            <strong>Page ${page.number}</strong>
-            <span>${escapeHtml(layoutLabel(page.layout))}</span>
-          </button>
-          <button
-            class="page-selection-toggle${isSelected ? " is-active" : ""}"
-            type="button"
-            data-toggle-preview-selection="${escapeHtml(page.id)}"
-            aria-pressed="${isSelected}"
-            title="${isSelected ? "Remove page from layout selection" : "Select page for layout"}"
-            style="display:inline-flex;flex:0 0 auto;min-height:30px;align-items:center;justify-content:center;"
-          >
-            ${isSelected ? "Selected" : "Select"}
-          </button>
+          <div class="page-slider-card-head-row">
+            <button
+              class="page-slider-card-focus"
+              type="button"
+              data-focus-preview-page="${escapeHtml(page.id)}"
+              aria-label="Focus page ${page.number}"
+            >
+              <strong>Page ${page.number}</strong>
+              <span>${escapeHtml(layoutLabel(page.layout))}</span>
+            </button>
+            <button
+              class="page-selection-toggle${isSelected ? " is-active" : ""}"
+              type="button"
+              data-toggle-preview-selection="${escapeHtml(page.id)}"
+              aria-pressed="${isSelected}"
+              title="${isSelected ? "Remove page from layout selection" : "Select page for layout"}"
+            >
+              ${isSelected ? "Selected" : "Select"}
+            </button>
+            ${pairLinkButton}
+          </div>
         </div>
         <div class="page-slider-card-body">
-          ${renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole)}
+          ${renderFullBookPageCard(book, page, activeGeneratingPageId)}
         </div>
       </article>
     `;
-  }).join("");
+    pageCards.push(card);
+  }
   return `
     <div class="full-book-preview-head">
       <div class="full-book-preview-head-copy">
@@ -2151,9 +2263,8 @@ function renderFullBookPreviewMarkup(book) {
       </div>
     </div>
     ${renderContextualPreviewToolbar(book, selectedPages)}
-    ${pairPreview}
     <div class="full-book-preview-list page-slider" aria-label="Book pages">
-      ${pageCards}
+      ${pageCards.join("")}
     </div>
   `;
 }
@@ -2216,7 +2327,7 @@ async function setPageImageFromFile(file, pageId = activePage().id) {
   const book = activeBook();
   const page = book.pages.find((item) => item.id === pageId) || activePage();
   setStatus("Preparing page image", "Resizing the uploaded image for this page.");
-  const imageDataUrl = await resizeFileToDataUrl(file, 2400, 0.92);
+  const { dataUrl: imageDataUrl, width: naturalWidth, height: naturalHeight } = await resizeFileToDataUrl(file, 2400, 0.92);
   const previewUrl = imageDataUrl;
   revokeBlobUrl(page.imageUrl);
   Object.assign(page, {
@@ -2224,9 +2335,11 @@ async function setPageImageFromFile(file, pageId = activePage().id) {
     imageDataUrl,
     fileName: file.name,
     imageSource: "uploaded",
-    imageScale: 1,
+    imageScale: DEFAULT_IMAGE_SCALE,
     imageOffsetX: DEFAULT_IMAGE_OFFSET,
     imageOffsetY: DEFAULT_IMAGE_OFFSET,
+    imageNaturalWidth: naturalWidth,
+    imageNaturalHeight: naturalHeight,
     prompt: "",
     notes: `Uploaded image: ${file.name}`,
   });
@@ -2264,9 +2377,11 @@ function useGeneratedImageOnPage(imageId, pageId) {
     imageDataUrl: image.imageDataUrl,
     fileName: image.fileName,
     imageSource: "generated",
-    imageScale: 1,
+    imageScale: DEFAULT_IMAGE_SCALE,
     imageOffsetX: DEFAULT_IMAGE_OFFSET,
     imageOffsetY: DEFAULT_IMAGE_OFFSET,
+    imageNaturalWidth: Number(image.imageNaturalWidth) || 0,
+    imageNaturalHeight: Number(image.imageNaturalHeight) || 0,
     prompt: image.prompt,
     notes: image.notes,
   });
@@ -2287,6 +2402,8 @@ function addGeneratedImageToLibrary(book, page, result, prompt, notes) {
     notes,
     sourcePageId: page.id,
     sourcePageNumber: page.number,
+    imageNaturalWidth: Number(page.imageNaturalWidth) || 0,
+    imageNaturalHeight: Number(page.imageNaturalHeight) || 0,
     createdAt: new Date().toISOString(),
   };
   book.imageLibrary = normalizeGeneratedImageLibrary([...(book.imageLibrary || []), nextImage], book.pages);
@@ -2428,12 +2545,12 @@ async function generatePageForId(pageId) {
         .filter(Boolean)
         .join("\n");
     const libraryImage = addGeneratedImageToLibrary(book, page, result, generatedPrompt, generatedNotes);
-    Object.assign(page, {
-      imageUrl: libraryImage.imageUrl,
-      imageDataUrl: libraryImage.imageDataUrl,
-      fileName: libraryImage.fileName,
-      imageSource: "generated",
-      imageScale: 1,
+  Object.assign(page, {
+    imageUrl: libraryImage.imageUrl,
+    imageDataUrl: libraryImage.imageDataUrl,
+    fileName: libraryImage.fileName,
+    imageSource: "generated",
+      imageScale: DEFAULT_IMAGE_SCALE,
       imageOffsetX: DEFAULT_IMAGE_OFFSET,
       imageOffsetY: DEFAULT_IMAGE_OFFSET,
       prompt: libraryImage.prompt,
@@ -2580,11 +2697,11 @@ async function generateActivePage() {
 async function handleCoverFile(file) {
   const book = activeBook();
   setStatus("Preparing cover", "Resizing the cover locally for style reference.");
-  const previewUrl = await resizeFileToDataUrl(file, 900, 0.9);
-  const referenceUrl = await resizeFileToDataUrl(file, 1400, 0.9);
+  const previewResult = await resizeFileToDataUrl(file, 900, 0.9);
+  const referenceResult = await resizeFileToDataUrl(file, 1400, 0.9);
   book.coverFileName = file.name;
-  book.coverPreviewUrl = previewUrl;
-  book.coverReferenceUrl = referenceUrl;
+  book.coverPreviewUrl = previewResult.dataUrl;
+  book.coverReferenceUrl = referenceResult.dataUrl;
   touchActiveBook();
   saveState();
   setStatus("Cover loaded", "The cover will guide new page illustrations.");
@@ -2636,7 +2753,11 @@ function resizeFileToDataUrl(file, maxSide = 1024, quality = 0.92) {
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("Unable to process the cover image.");
         ctx.drawImage(image, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        resolve({
+          dataUrl: canvas.toDataURL("image/jpeg", quality),
+          width: image.width,
+          height: image.height,
+        });
       } catch (error) {
         reject(error);
       } finally {
@@ -2877,11 +2998,11 @@ async function analyzeCharacterSeed({ saveAfterAnalysis = false } = {}) {
 }
 
 async function setCharacterSeedFromFile(file) {
-  const dataUrl = await resizeFileToDataUrl(file, 1024, 0.9);
+  const result = await resizeFileToDataUrl(file, 1024, 0.9);
   if (!characterDraft) {
     setNewCharacterDraft();
   }
-  characterDraft.seedImageDataUrl = dataUrl;
+  characterDraft.seedImageDataUrl = result.dataUrl;
   characterDraft.seedImageFileName = file.name;
   renderCharacterEditor();
   await analyzeCharacterSeed({ saveAfterAnalysis: Boolean(characterDraft?.name?.trim()) });
@@ -3423,9 +3544,27 @@ refs.publishBookButton.addEventListener("click", () => {
 
 refs.fullBookPreview.addEventListener("click", (event) => {
   const pageId = event.target.closest(".full-book-page")?.dataset.pageId || activePage().id;
+  const pairLinkButton = event.target.closest("[data-link-preview-pages]");
+  if (pairLinkButton) {
+    const pairIds = pairLinkButton.dataset.linkPreviewPages.split(",").filter(Boolean);
+    const pairPages = pairIds.map((id) => activeBook().pages.find((page) => page.id === id));
+    if (pairPages.length === 2 && areFacingPages(activeBook(), pairPages[0], pairPages[1])) {
+      const alreadyLinked = selectedPreviewPageIds.length === 2
+        && pairIds.every((id) => selectedPreviewPageIds.includes(id));
+      if (alreadyLinked) resetTwoPageLayouts(pairIds);
+      selectedPreviewPageIds = alreadyLinked ? [pairIds[0]] : pairIds;
+      activeBook().activePageId = pairIds[0];
+      saveState();
+      render();
+    }
+    return;
+  }
   const focusPageButton = event.target.closest("[data-focus-preview-page]");
   if (focusPageButton) {
     const focusPageId = focusPageButton.dataset.focusPreviewPage;
+    if (selectedPreviewPageIds.length === 2 && !selectedPreviewPageIds.includes(focusPageId)) {
+      resetTwoPageLayouts(selectedPreviewPageIds);
+    }
     activeBook().activePageId = focusPageId;
     if (!selectedPreviewPageIds.includes(focusPageId)) selectedPreviewPageIds = [focusPageId];
     saveState();
@@ -3436,10 +3575,15 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   if (selectionButton) {
     const selectedPageId = selectionButton.dataset.togglePreviewSelection;
     const wasSelected = selectedPreviewPageIds.includes(selectedPageId);
+    if (selectedPreviewPageIds.length === 2) resetTwoPageLayouts(selectedPreviewPageIds);
     if (wasSelected) {
       selectedPreviewPageIds = selectedPreviewPageIds.filter((id) => id !== selectedPageId);
     } else {
-      selectedPreviewPageIds = [...selectedPreviewPageIds, selectedPageId].slice(-2);
+      const currentPage = activeBook().pages.find((page) => page.id === selectedPreviewPageIds[0]);
+      const selectedPage = activeBook().pages.find((page) => page.id === selectedPageId);
+      selectedPreviewPageIds = currentPage && areFacingPages(activeBook(), currentPage, selectedPage)
+        ? [currentPage.id, selectedPage.id]
+        : [selectedPageId];
     }
     if (!selectedPreviewPageIds.length) selectedPreviewPageIds = [selectedPageId];
     activeBook().activePageId = wasSelected ? selectedPreviewPageIds[0] : selectedPageId;
@@ -3568,9 +3712,6 @@ refs.fullBookPreview.addEventListener("click", (event) => {
         default:
           break;
       }
-      if (normalizeImageScale(page.imageScale) < IMAGE_MIN_PAN_SCALE) {
-        next.imageScale = IMAGE_MIN_PAN_SCALE;
-      }
       return next;
     });
     return;
@@ -3580,7 +3721,7 @@ refs.fullBookPreview.addEventListener("click", (event) => {
     updatePagesByIds(pageIdsFromControl(resetImageButton, pageId), {
       imageOffsetX: DEFAULT_IMAGE_OFFSET,
       imageOffsetY: DEFAULT_IMAGE_OFFSET,
-      imageScale: 1,
+      imageScale: DEFAULT_IMAGE_SCALE,
     });
     return;
   }
@@ -3588,7 +3729,10 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   if (imageScaleStepButton) {
     const step = Number(imageScaleStepButton.dataset.imageScaleStep || 0);
     updatePagesByIds(pageIdsFromControl(imageScaleStepButton, pageId), (page) => ({
-      imageScale: normalizeImageScale(normalizeImageScale(page.imageScale) + step),
+      imageScale: Math.max(
+        normalizeImageScale(normalizeImageScale(page.imageScale) + step),
+        imageMinimumScale(page),
+      ),
     }));
   }
 });

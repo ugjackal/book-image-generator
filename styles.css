@@ -1002,9 +1002,8 @@ select:focus {
 }
 
 .full-book-preview-list {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(320px, 92%);
+  display: flex;
+  align-items: stretch;
   gap: 8px;
   max-height: min(72vh, 900px);
   overflow: auto;
@@ -1070,12 +1069,44 @@ select:focus {
 }
 
 .page-slider-card {
+  flex: 0 0 min(92%, 440px);
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
   scroll-snap-align: start;
+}
+
+.page-pair-link-button {
+  display: grid;
+  gap: 2px;
+  place-items: center;
+  width: 40px;
+  min-height: 40px;
+  padding: 7px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  box-shadow: 0 5px 14px rgba(73, 53, 38, 0.08);
+}
+
+.page-pair-link-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.page-pair-link-button span {
+  font-size: 0.65rem;
+  font-weight: 900;
+}
+
+.page-pair-link-button:hover,
+.page-pair-link-button.is-active {
+  border-color: var(--accent);
+  background: rgba(230, 118, 63, 0.1);
+  color: var(--accent);
 }
 
 .page-slider-card.is-selected {
@@ -1088,12 +1119,18 @@ select:focus {
 }
 
 .page-slider-card-head {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+  display: grid;
+  gap: 6px;
   min-height: 48px;
   padding: 6px 8px;
   background: rgba(255, 250, 244, 0.92);
+}
+
+.page-slider-card-head-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
 }
 
 .page-slider-card-focus {
@@ -1101,7 +1138,7 @@ select:focus {
   flex: 1 1 auto;
   gap: 8px;
   align-items: center;
-  width: 100%;
+  width: auto;
   min-height: 34px;
   min-width: 0;
   padding: 6px;
@@ -1124,6 +1161,7 @@ select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid var(--line);
@@ -1473,7 +1511,7 @@ select:focus {
 .mini-single-page,
 .mini-spread {
   container-type: inline-size;
-  min-height: 220px;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
@@ -1482,15 +1520,37 @@ select:focus {
 
 .mini-stack {
   display: grid;
+  aspect-ratio: var(--page-aspect, 1.5);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.mini-stack.stack-text-top {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.mini-stack.stack-image-top {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.mini-stack .mini-text-preview,
+.mini-stack .page-art {
+  min-height: 0;
+  height: 100%;
+}
+
+.mini-stack .page-art {
+  aspect-ratio: auto;
 }
 
 .mini-single-page {
   display: grid;
+  aspect-ratio: var(--page-aspect, 1.5);
 }
 
 .mini-single-page-text .mini-text-preview,
 .mini-single-page-image .page-art {
-  min-height: 220px;
+  min-height: 0;
+  height: 100%;
 }
 
 .mini-text-preview {
@@ -1529,6 +1589,7 @@ select:focus {
 
 .mini-overlay {
   position: relative;
+  aspect-ratio: var(--page-aspect, 1.5);
 }
 
 .mini-overlay .page-art {
@@ -2205,9 +2266,8 @@ select:focus {
   position: absolute;
   display: block;
   transform-origin: center center;
-  will-change: transform, left, top, width, height;
+  will-change: left, top, width, height;
   transition:
-    transform 160ms ease,
     left 160ms ease,
     top 160ms ease,
     width 160ms ease,

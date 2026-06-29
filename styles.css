@@ -1363,10 +1363,16 @@ select:focus {
   background: #fffdfa;
 }
 
+.generated-image-thumbnail-shell {
+  position: relative;
+  min-width: 0;
+}
+
 .generated-image-thumbnail {
   display: grid;
   gap: 5px;
   min-width: 0;
+  width: 100%;
   padding: 4px;
   border: 2px solid transparent;
   border-radius: 8px;
@@ -1402,6 +1408,33 @@ select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.generated-image-thumbnail-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(168, 74, 77, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--danger);
+  box-shadow: 0 3px 8px rgba(73, 53, 38, 0.14);
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.generated-image-thumbnail-delete:hover,
+.generated-image-thumbnail-delete:focus-visible {
+  border-color: rgba(168, 74, 77, 0.65);
+  background: #fff;
+  outline: none;
 }
 
 .page-image-controls {

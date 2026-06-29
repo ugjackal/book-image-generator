@@ -50,6 +50,14 @@ Generate a full page scene:
 python bookgen.py page --page-number 5 --characters Layla Ginger --scene "Layla and Ginger are having a playful tug-of-war over a bone in the dirt yard." --setting "A rustic yard with packed dirt and dry grass around the edges." --mood "Playful and mischievous." --text-space "Quiet open space at top left." --show-prompt
 ```
 
+Generate a page illustration and save it straight into `outputs/pages/` in one step:
+
+```powershell
+.\generate-art.ps1 -Kind page -PageNumber 5 -Characters Layla, Ginger -Scene "Layla and Ginger are having a playful tug-of-war over a bone in the dirt yard." -Setting "A rustic yard with packed dirt and dry grass around the edges." -Mood "Playful and mischievous." -TextSpace "Quiet open space at top left."
+```
+
+The helper automatically uses the active saved book's title, cover reference, print size, selected page layout, scene-style settings, and full profiles for explicitly listed or scene-mentioned characters. Command arguments override the saved page values when supplied.
+
 Generate a transparent character PNG like the browser app:
 
 ```powershell

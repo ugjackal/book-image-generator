@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import secrets
 import sys
 import mimetypes
+import shutil
 import threading
 import uuid
 from datetime import datetime
@@ -15,7 +17,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from PIL import Image, ImageDraw, ImageFont
 from openai import OpenAI
@@ -54,6 +56,26 @@ def load_env_file(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key:
             os.environ[key] = value
+
+
+def output_image_library_version() -> str:
+    image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    entries: list[str] = []
+    for folder in (OUTPUT_DIR, PAGE_OUTPUT_DIR):
+        if not folder.exists():
+            continue
+        for path in folder.iterdir():
+            if not path.is_file() or path.suffix.lower() not in image_extensions:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append(
+                f"{path.relative_to(BASE_DIR).as_posix()}:{stat.st_size}:{stat.st_mtime_ns}"
+            )
+    signature = "\n".join(sorted(entries)).encode("utf-8")
+    return hashlib.sha256(signature).hexdigest()[:16]
 
 
 def slugify(value: str) -> str:
@@ -478,6 +500,9 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
     selected_characters = payload.get("characters", [])
     provided_profiles = payload.get("character_profiles", [])
     scene_style = load_scene_style()
+    provided_scene_style = payload.get("scene_style")
+    if isinstance(provided_scene_style, dict):
+        scene_style = {**scene_style, **provided_scene_style}
 
     if isinstance(selected_characters, str):
         selected_characters = [
@@ -541,12 +566,20 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
         f"Create one picture-book illustration for {page_label} of '{project_title}'.",
         "Generate only this page.",
         "Do not include printed text in the image; leave space for editable page text.",
+        "Direction priority: the page text and illustration description are the highest-priority source for the scene's action, emotion, pose, expression, and storytelling.",
+        "Character profiles preserve identity, anatomy, markings, and continuity. Reusable profile pose or expression notes are fallback guidance only and must not weaken or contradict this page's specific story moment.",
         "Style: warm soft hand-painted children's-book art, sunrise palette, gentle realism, readable shapes.",
         "Use the uploaded cover image as the primary style reference. Match its palette, mood, brushwork, lighting, and visual finish across the book.",
         "Keep character design consistent from page to page. Do not redesign the characters, and preserve their proportions, markings, species, and clothing or accessories.",
         "If multiple characters are listed, every one of them must appear in the image and be visually readable.",
         "Avoid text, captions, watermarks, logos, borders, speech bubbles, and photorealism.",
     ]
+    book_style = str(scene_style.get("bookStyle", "")).strip()
+    drawing_style = str(scene_style.get("drawingStyle", "")).strip()
+    if book_style:
+        lines.append(f"Book style lock: {book_style}")
+    if drawing_style:
+        lines.append(f"Drawing style lock: {drawing_style}")
 
     if page_text:
         lines.append(f"Page text context: {page_text}")
@@ -601,6 +634,13 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
                 character_lines.append(f"birth state: {profile.get('birthState')}")
             if profile.get("distinctiveAnatomy"):
                 character_lines.append(f"distinctive anatomy: {profile.get('distinctiveAnatomy')}")
+            if profile.get("expressionPose"):
+                character_lines.append(
+                    "default expression and pose only when the page does not specify them: "
+                    f"{profile.get('expressionPose')}"
+                )
+            if profile.get("styleNotes"):
+                character_lines.append(f"character style lock: {profile.get('styleNotes')}")
             if profile.get("personality"):
                 character_lines.append(f"personality: {profile.get('personality')}")
             if profile.get("groupIdentity"):
@@ -611,6 +651,7 @@ def build_page_scene_prompt(payload: dict[str, Any]) -> str:
 
     lines.extend(
         [
+            "Final storytelling priority: faithfully depict the struggle, action, mood, and emotional beat described by this page, even when a character's reusable profile suggests a different default demeanor or pose.",
             "Treat the cover art and character profiles as canon for this book.",
             "Keep it safe, expressive, uncluttered, and appropriate for the target audience.",
         ]
@@ -1545,7 +1586,10 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/dev-version":
-            self.send_json(HTTPStatus.OK, {"version": DEV_SERVER_VERSION})
+            self.send_json(
+                HTTPStatus.OK,
+                {"version": f"{DEV_SERVER_VERSION}:{output_image_library_version()}"},
+            )
             return
         if parsed.path == "/api/state":
             self.handle_get_state()
@@ -1565,6 +1609,13 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/characters":
             self.handle_upsert_character()
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/outputs":
+            self.handle_delete_output()
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
 
@@ -1612,6 +1663,48 @@ class CharacterGeneratorHandler(SimpleHTTPRequestHandler):
             for path in sorted(output_paths, key=lambda item: item.stat().st_mtime, reverse=True)
         ]
         self.send_json(HTTPStatus.OK, {"files": files})
+
+    def handle_delete_output(self) -> None:
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        raw_path = str(params.get("path", [""])[0]).strip()
+        if not raw_path:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Missing output path."})
+            return
+
+        candidate = Path(raw_path.lstrip("/"))
+        if candidate.is_absolute():
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid output path."})
+            return
+
+        target = (BASE_DIR / candidate).resolve()
+        try:
+            base_resolved = BASE_DIR.resolve()
+            target.relative_to(base_resolved)
+        except Exception:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid output path."})
+            return
+
+        if not target.exists() or not target.is_file():
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Output file not found."})
+            return
+
+        deleted_dir = OUTPUT_DIR / "deleted"
+        deleted_dir.mkdir(parents=True, exist_ok=True)
+        destination = deleted_dir / target.name
+        if destination.exists():
+            stem = destination.stem
+            suffix = destination.suffix
+            counter = 1
+            while destination.exists():
+                destination = deleted_dir / f"{stem}-{counter}{suffix}"
+                counter += 1
+
+        shutil.move(str(target), str(destination))
+        self.send_json(
+            HTTPStatus.OK,
+            {"ok": True, "moved": f"/{destination.relative_to(BASE_DIR).as_posix()}"},
+        )
 
     def handle_list_characters(self) -> None:
         self.send_json(HTTPStatus.OK, {"characters": list_character_summaries()})

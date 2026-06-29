@@ -11,7 +11,7 @@ const DEFAULT_IMAGE_SCALE = 1;
 const DEFAULT_IMAGE_OFFSET = 0;
 const IMAGE_OFFSET_MIN = -100;
 const IMAGE_OFFSET_MAX = 100;
-const IMAGE_NUDGE_STEP = 20;
+const IMAGE_NUDGE_STEP = 10;
 const IMAGE_MIN_PAN_SCALE = 0.7;
 const PRINT_SIZES = {
   "landscape-10x8": { label: "Landscape picture book 12 x 8 in", width: 3600, height: 2400, aspect: 1.5 },
@@ -174,6 +174,7 @@ const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
   imageOffsetY: DEFAULT_IMAGE_OFFSET,
   imageNaturalWidth: 0,
   imageNaturalHeight: 0,
+  linkedPairKey: "",
   imageSource: "",
   imageDataUrl: "",
   imageUrl: "",
@@ -197,6 +198,7 @@ const defaultBook = (title = "Untitled Book") => {
     manuscript: "",
     printSize: DEFAULT_PRINT_SIZE,
     imageLibrary: [],
+    linkedPagePairs: [],
     pages: [firstPage],
     activePageId: firstPage.id,
     createdAt: new Date().toISOString(),
@@ -226,6 +228,7 @@ const defaultState = () => {
   return {
     books: [book],
     activeBookId: book.id,
+    selectedPreviewPageIds: [],
     authors: ["Kim Stewart", "Tony Stewart"],
     characters: [],
     status: "Ready",
@@ -235,27 +238,32 @@ const defaultState = () => {
   };
 };
 
-const legacyBookFromState = (parsed) => ({
-  id: makeId(),
-  projectTitle: parsed.projectTitle || "Untitled Book",
-  authorName: parsed.authorName || "",
-  coverFileName: parsed.coverFileName || "",
-  coverPreviewUrl: parsed.coverPreviewUrl || "",
-  coverReferenceUrl: parsed.coverReferenceUrl || "",
-  backCoverSummary: parsed.backCoverSummary || "",
-  audience: parsed.audience || "3-8",
-  suggestedPageCount: parsed.suggestedPageCount || "",
-  manuscript: parsed.manuscript || "",
-  printSize: normalizePrintSize(parsed.printSize),
-  pages: normalizePages(parsed.pages),
-  activePageId: parsed.activePageId || "",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-});
+const legacyBookFromState = (parsed) => {
+  const pages = normalizePages(parsed.pages);
+  return {
+    id: makeId(),
+    projectTitle: parsed.projectTitle || "Untitled Book",
+    authorName: parsed.authorName || "",
+    coverFileName: parsed.coverFileName || "",
+    coverPreviewUrl: parsed.coverPreviewUrl || "",
+    coverReferenceUrl: parsed.coverReferenceUrl || "",
+    backCoverSummary: parsed.backCoverSummary || "",
+    audience: parsed.audience || "3-8",
+    suggestedPageCount: parsed.suggestedPageCount || "",
+    manuscript: parsed.manuscript || "",
+    printSize: normalizePrintSize(parsed.printSize),
+    pages,
+    linkedPagePairs: normalizeLinkedPagePairs(parsed.linkedPagePairs, pages),
+    activePageId: parsed.activePageId || "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+};
 
 let state = defaultState();
 let stateSaveTimer = null;
 let selectedPreviewPageIds = [];
+let openGeneratedImagePickerPageIds = new Set();
 let activeCharacterName = "";
 let characterDraft = null;
 let characterEditorOpen = false;
@@ -270,9 +278,11 @@ function normalizeLoadedState(parsed) {
     if (!book.activePageId || !book.pages.some((page) => page.id === book.activePageId)) {
       book.activePageId = book.pages[0]?.id || "";
     }
+    const selectedPreviewPageIds = normalizeSelectedPreviewPageIds(parsed.selectedPreviewPageIds, book);
     return {
       books: [book],
       activeBookId: book.id,
+      selectedPreviewPageIds,
       authors: normalizeAuthors(parsed.authors, book.authorName),
       characters: [],
       status: "Ready",
@@ -282,11 +292,14 @@ function normalizeLoadedState(parsed) {
     };
   }
   const books = parsed.books.length ? parsed.books.map(normalizeBook) : fallback.books;
+  const activeBookId = books.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : books[0].id;
+  const activeBook = books.find((book) => book.id === activeBookId) || books[0];
   return {
     ...fallback,
     ...parsed,
     books,
-    activeBookId: books.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : books[0].id,
+    activeBookId,
+    selectedPreviewPageIds: normalizeSelectedPreviewPageIds(parsed.selectedPreviewPageIds, activeBook),
     authors: normalizeAuthors(parsed.authors, books.map((book) => book.authorName)),
     characters: [],
     status: "Ready",
@@ -378,6 +391,7 @@ function queueServerStateSave(immediate = false) {
 }
 
 function saveState() {
+  state.selectedPreviewPageIds = [...selectedPreviewPageIds];
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
   } catch {
@@ -407,11 +421,12 @@ function ensureBookPresence() {
 }
 
 function normalizeBook(book) {
+  const pages = normalizePages(book.pages);
   const normalized = {
     ...defaultBook(book.projectTitle || "Untitled Book"),
     ...book,
     printSize: normalizePrintSize(book.printSize),
-    pages: normalizePages(book.pages),
+    pages,
   };
   if (!normalized.activePageId || !normalized.pages.some((page) => page.id === normalized.activePageId)) {
     normalized.activePageId = normalized.pages[0]?.id || "";
@@ -432,9 +447,78 @@ function normalizeBook(book) {
     ),
     imageDataUrl: page.imageDataUrl || "",
     imageUrl: page.imageDataUrl || page.imageUrl || "",
+    linkedPairKey: String(page?.linkedPairKey || "").trim(),
   }));
   normalized.imageLibrary = normalizeGeneratedImageLibrary(normalized.imageLibrary, normalized.pages);
+  normalized.linkedPagePairs = normalizeLinkedPagePairs(normalized.linkedPagePairs, normalized.pages);
   return normalized;
+}
+
+function normalizeLinkedPagePairs(linkedPagePairs, pages = []) {
+  const pageById = new Map((Array.isArray(pages) ? pages : []).map((page) => [page.id, page]));
+  const pairs = Array.isArray(linkedPagePairs) ? linkedPagePairs : [];
+  const normalized = [];
+  const seen = new Set();
+  pairs.forEach((pair) => {
+    const ids = Array.isArray(pair) ? pair : String(pair || "").split(",");
+    const firstId = String(ids[0] || "").trim();
+    const secondId = String(ids[1] || "").trim();
+    const firstPage = pageById.get(firstId);
+    const secondPage = pageById.get(secondId);
+    if (!firstPage || !secondPage || !areFacingPages({ pages }, firstPage, secondPage)) return;
+    const key = [firstPage.id, secondPage.id].join(",");
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push([firstPage.id, secondPage.id]);
+  });
+  return normalized;
+}
+
+function linkedPairKey(firstPageId, secondPageId) {
+  return [firstPageId, secondPageId].join(",");
+}
+
+function hasLinkedPagePair(book, firstPageId, secondPageId) {
+  const key = linkedPairKey(firstPageId, secondPageId);
+  if (Array.isArray(book?.linkedPagePairs) && book.linkedPagePairs.some((pair) => linkedPairKey(pair?.[0], pair?.[1]) === key)) {
+    return true;
+  }
+  return Array.isArray(book?.pages) && book.pages.some((page) => page.linkedPairKey === key);
+}
+
+function previewSelectionForPage(book, pageId) {
+  const pages = Array.isArray(book?.pages) ? book.pages : [];
+  const pageIndex = pages.findIndex((page) => page.id === pageId);
+  if (pageIndex < 0) return [];
+  const pairStartIndex = pageIndex % 2 === 0 ? pageIndex : pageIndex - 1;
+  const firstPage = pages[pairStartIndex];
+  const secondPage = pages[pairStartIndex + 1];
+  return firstPage && secondPage && hasLinkedPagePair(book, firstPage.id, secondPage.id)
+    ? [firstPage.id, secondPage.id]
+    : [pageId];
+}
+
+function toggleLinkedPagePair(book, firstPageId, secondPageId) {
+  if (!book) return;
+  const key = linkedPairKey(firstPageId, secondPageId);
+  const pairs = normalizeLinkedPagePairs(book.linkedPagePairs, book.pages);
+  const existingIndex = pairs.findIndex((pair) => linkedPairKey(pair[0], pair[1]) === key);
+  if (existingIndex >= 0) {
+    pairs.splice(existingIndex, 1);
+    book.pages
+      .filter((page) => page.linkedPairKey === key)
+      .forEach((page) => {
+        page.linkedPairKey = "";
+      });
+  } else {
+    const firstPage = book.pages.find((page) => page.id === firstPageId);
+    const secondPage = book.pages.find((page) => page.id === secondPageId);
+    if (!firstPage || !secondPage || !areFacingPages(book, firstPage, secondPage)) return;
+    pairs.push([firstPage.id, secondPage.id]);
+    firstPage.linkedPairKey = key;
+    secondPage.linkedPairKey = key;
+  }
+  book.linkedPagePairs = pairs;
 }
 
 function normalizeGeneratedImageLibrary(imageLibrary, pages = []) {
@@ -1935,6 +2019,7 @@ function renderPageTextMarkup(book, page, className = "mini-text-preview") {
 
 function renderPageActions(book, page, isGeneratingPage) {
   const hasExistingImages = normalizeGeneratedImageLibrary(book.imageLibrary, book.pages).length > 0;
+  const isPickerOpen = openGeneratedImagePickerPageIds.has(page.id);
   return `
     <div class="full-book-page-action-row">
       <button
@@ -1955,7 +2040,7 @@ function renderPageActions(book, page, isGeneratingPage) {
         data-toggle-generated-image-picker="${escapeHtml(page.id)}"
         aria-label="Select from existing images"
         title="Select from existing images"
-        aria-expanded="false"
+        aria-expanded="${isPickerOpen ? "true" : "false"}"
         ${hasExistingImages ? "" : "disabled"}
       >
         <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
@@ -2006,23 +2091,34 @@ function renderGeneratedImagePicker(book, page) {
       const isSelected = image.imageUrl === page.imageUrl;
       const sourceLabel = image.sourcePageNumber ? `Page ${image.sourcePageNumber}` : `Image ${index + 1}`;
       return `
-        <button
-          class="generated-image-thumbnail${isSelected ? " is-selected" : ""}"
-          type="button"
-          data-use-generated-image-id="${escapeHtml(image.id)}"
-          data-target-page-id="${escapeHtml(page.id)}"
-          aria-label="Use generated image ${index + 1} on page ${page.number}"
-          aria-pressed="${isSelected ? "true" : "false"}"
-          title="Use ${escapeHtml(image.fileName || sourceLabel)}"
-        >
-          <img src="${escapeHtml(image.imageUrl)}" alt="" loading="lazy" />
-          <span>${escapeHtml(sourceLabel)}</span>
-        </button>
+        <div class="generated-image-thumbnail-shell">
+          <button
+            class="generated-image-thumbnail${isSelected ? " is-selected" : ""}"
+            type="button"
+            data-use-generated-image-id="${escapeHtml(image.id)}"
+            data-target-page-id="${escapeHtml(page.id)}"
+            aria-label="Use generated image ${index + 1} on page ${page.number}"
+            aria-pressed="${isSelected ? "true" : "false"}"
+            title="Use ${escapeHtml(image.fileName || sourceLabel)}"
+          >
+            <img src="${escapeHtml(image.imageUrl)}" alt="" loading="lazy" />
+            <span>${escapeHtml(sourceLabel)}</span>
+          </button>
+          <button
+            class="generated-image-thumbnail-delete"
+            type="button"
+            data-delete-generated-image-id="${escapeHtml(image.id)}"
+            aria-label="Delete generated image ${index + 1}"
+            title="Delete ${escapeHtml(image.fileName || sourceLabel)}"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
       `;
     })
     .join("");
   return `
-    <div class="generated-image-picker" data-generated-image-picker="${escapeHtml(page.id)}" hidden>
+    <div class="generated-image-picker" data-generated-image-picker="${escapeHtml(page.id)}"${openGeneratedImagePickerPageIds.has(page.id) ? "" : " hidden"}>
       <div class="generated-image-thumbnail-grid" aria-label="Generated image choices">
         ${thumbnails}
       </div>
@@ -2064,9 +2160,8 @@ function renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole =
 }
 
 function selectedPreviewPages(book) {
-  const validIds = selectedPreviewPageIds.filter((id) => book.pages.some((page) => page.id === id));
-  if (!validIds.length) validIds.push(book.activePageId || book.pages[0]?.id);
-  selectedPreviewPageIds = [...new Set(validIds.filter(Boolean))].slice(0, 2);
+  selectedPreviewPageIds = normalizeSelectedPreviewPageIds(selectedPreviewPageIds, book);
+  state.selectedPreviewPageIds = [...selectedPreviewPageIds];
   let pages = selectedPreviewPageIds
     .map((id) => book.pages.find((page) => page.id === id))
     .filter(Boolean)
@@ -2074,8 +2169,29 @@ function selectedPreviewPages(book) {
   if (pages.length === 2 && !areFacingPages(book, pages[0], pages[1])) {
     pages = [pages.find((page) => page.id === book.activePageId) || pages[0]];
     selectedPreviewPageIds = pages.map((page) => page.id);
+    state.selectedPreviewPageIds = [...selectedPreviewPageIds];
   }
   return pages;
+}
+
+function normalizeSelectedPreviewPageIds(value, book) {
+  const pages = Array.isArray(book?.pages) ? book.pages : [];
+  const validIds = [...new Set((Array.isArray(value) ? value : []).filter((id) => pages.some((page) => page.id === id)))].slice(0, 2);
+  if (!validIds.length) {
+    const fallbackId = book?.activePageId || pages[0]?.id || "";
+    return fallbackId ? [fallbackId] : [];
+  }
+  if (validIds.length === 2) {
+    const selectedPages = validIds
+      .map((id) => pages.find((page) => page.id === id))
+      .filter(Boolean)
+      .sort((a, b) => a.number - b.number);
+    if (selectedPages.length === 2 && !areFacingPages(book, selectedPages[0], selectedPages[1])) {
+      const fallbackId = book?.activePageId || selectedPages[0]?.id || "";
+      return fallbackId ? [fallbackId] : [];
+    }
+  }
+  return validIds;
 }
 
 function areFacingPages(book, firstPage, secondPage) {
@@ -2101,9 +2217,13 @@ function renderContextualPreviewToolbar(book, pages) {
   const pageIds = targetPages.map((page) => page.id).join(",");
   const sourcePage = targetPages.find((page) => page.id === book.activePageId) || targetPages[0] || defaultPage();
   const isPair = targetPages.length === 2;
+  const spreadLayout = isPair && layoutMode(sourcePage.layout) === "spread";
+  const imagePage = spreadLayout
+    ? (spreadTextSide(sourcePage.layout) === "right" ? targetPages[0] : targetPages[1])
+    : sourcePage;
   const layoutOptions = isPair ? TWO_PAGE_LAYOUT_OPTIONS : SINGLE_PAGE_LAYOUT_OPTIONS;
   const hasImage = targetPages.some((page) => page.imageUrl);
-  const isGeneratingSourcePage = state.isGenerating && (state.generatingPageId || book.activePageId) === sourcePage.id;
+  const isGeneratingSourcePage = state.isGenerating && (state.generatingPageId || book.activePageId) === imagePage.id;
   return `
     <section class="contextual-page-toolbar" data-page-id="${escapeHtml(pageIds)}">
       <div class="contextual-page-toolbar-head">
@@ -2131,7 +2251,7 @@ function renderContextualPreviewToolbar(book, pages) {
       </div>
       <div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Image</span>
-        ${renderPageActions(book, sourcePage, isGeneratingSourcePage)}
+        ${renderPageActions(book, imagePage, isGeneratingSourcePage)}
         <div class="page-image-nudge-group">
           <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up"${hasImage ? "" : " disabled"}>&#8593;</button>
           <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left"${hasImage ? "" : " disabled"}>&#8592;</button>
@@ -2143,7 +2263,7 @@ function renderContextualPreviewToolbar(book, pages) {
           <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.12" aria-label="Scale image smaller" title="Scale image smaller"${hasImage ? "" : " disabled"}>&#8722;</button>
           <button class="ghost-button icon-button" type="button" data-image-scale-step="0.12" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
         </div>
-        ${renderGeneratedImagePicker(book, sourcePage)}
+        ${renderGeneratedImagePicker(book, imagePage)}
       </div>
     </section>
   `;
@@ -2199,11 +2319,37 @@ function renderFullBookPreviewMarkup(book) {
     const nextPage = book.pages[pageIndex + 1];
     const isFocused = page.id === book.activePageId;
     const isSelected = selectedIds.has(page.id);
+    let spreadRole = "";
+    const linkedPairStartIndex = pageIndex % 2 === 0 ? pageIndex : pageIndex - 1;
+    const linkedLeftPage = book.pages[linkedPairStartIndex];
+    const linkedRightPage = book.pages[linkedPairStartIndex + 1];
+    const isInLinkedPair = Boolean(linkedLeftPage && linkedRightPage)
+      && hasLinkedPagePair(book, linkedLeftPage.id, linkedRightPage.id);
+    if (isInLinkedPair) {
+      const pairLayout = normalizeLayout(linkedLeftPage.layout);
+      const isLeftPage = page.id === linkedLeftPage.id;
+      if (layoutMode(pairLayout) === "spread") {
+        spreadRole = pairLayout === "spread-text-left"
+          ? (isLeftPage ? "text" : "image")
+          : (isLeftPage ? "image" : "text");
+      } else if (layoutMode(pairLayout) === "overlay") {
+        const textPage = spreadTextSide(pairLayout) === "right" ? linkedRightPage : linkedLeftPage;
+        spreadRole = page.id === textPage.id ? "text" : "image";
+      }
+    } else if (selectedPages.length === 2 && isSelected) {
+      const pairLayout = normalizeLayout(selectedPages[0].layout);
+      if (layoutMode(pairLayout) === "spread") {
+        const isLeftPage = page.id === selectedPages[0].id;
+        spreadRole = pairLayout === "spread-text-left"
+          ? (isLeftPage ? "text" : "image")
+          : (isLeftPage ? "image" : "text");
+      } else if (layoutMode(pairLayout) === "overlay") {
+        const textPage = spreadTextSide(pairLayout) === "right" ? selectedPages[1] : selectedPages[0];
+        spreadRole = page.id === textPage.id ? "text" : "image";
+      }
+    }
     const isFacingPairStart = Boolean(nextPage) && page.number % 2 === 1 && nextPage.number === page.number + 1;
-    const pairIsLinked = isFacingPairStart
-      && selectedPages.length === 2
-      && selectedPages[0].id === page.id
-      && selectedPages[1].id === nextPage.id;
+    const pairIsLinked = isFacingPairStart && hasLinkedPagePair(book, page.id, nextPage.id);
     const pairLinkButton = isFacingPairStart
       ? `
         <button
@@ -2249,7 +2395,7 @@ function renderFullBookPreviewMarkup(book) {
           </div>
         </div>
         <div class="page-slider-card-body">
-          ${renderFullBookPageCard(book, page, activeGeneratingPageId)}
+          ${renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole)}
         </div>
       </article>
     `;
@@ -2390,6 +2536,81 @@ function useGeneratedImageOnPage(imageId, pageId) {
   saveState();
   setStatus("Generated image selected", `Page ${page.number} now uses ${image.fileName || "the selected illustration"}.`);
   render();
+}
+
+function deleteGeneratedImage(imageId, keepOpenPageId = "") {
+  const book = activeBook();
+  const images = normalizeGeneratedImageLibrary(book.imageLibrary, book.pages);
+  const image = images.find((item) => item.id === imageId);
+  if (!image) return;
+  const imageLabel = image.fileName || `image from page ${image.sourcePageNumber || "the library"}`;
+  const confirmed = window.confirm(`Move ${imageLabel} to the deleted folder? It will stay on disk but be removed from the active gallery and any pages using it.`);
+  if (!confirmed) return;
+  const imagePath = (() => {
+    try {
+      return new URL(image.imageUrl, window.location.href).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  if (!imagePath.startsWith("/outputs/")) {
+    setStatus("Generated image move failed", "This image cannot be moved to the deleted folder.");
+    return;
+  }
+  const nextLibrary = images.filter((item) => item.id !== imageId);
+  const responsePromise = fetch(`/api/outputs?path=${encodeURIComponent(imagePath)}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  responsePromise
+    .then(async (response) => {
+      if (!response.ok) {
+        let message = "Could not move the image file.";
+        try {
+          const result = await response.json();
+          if (result?.error) message = result.error;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(message);
+      }
+      const affectedPages = [];
+      book.pages.forEach((page) => {
+        if (page.imageUrl !== image.imageUrl) return;
+        if (page.imageSource !== "generated") return;
+        affectedPages.push(page.number);
+        Object.assign(page, {
+          imageUrl: "",
+          imageDataUrl: "",
+          fileName: "",
+          imageSource: "",
+          imageScale: DEFAULT_IMAGE_SCALE,
+          imageOffsetX: DEFAULT_IMAGE_OFFSET,
+          imageOffsetY: DEFAULT_IMAGE_OFFSET,
+          imageNaturalWidth: 0,
+          imageNaturalHeight: 0,
+          prompt: "",
+          notes: "",
+        });
+      });
+      book.imageLibrary = nextLibrary;
+      if (keepOpenPageId) {
+        openGeneratedImagePickerPageIds.add(keepOpenPageId);
+      }
+      touchActiveBook();
+      saveState();
+      if (affectedPages.length) {
+        setStatus("Generated image moved", `Moved ${imageLabel} to the deleted folder and cleared it from page${affectedPages.length > 1 ? "s" : ""} ${affectedPages.join(", ")}.`);
+      } else {
+        setStatus("Generated image moved", `Moved ${imageLabel} to the deleted folder.`);
+      }
+      render();
+    })
+    .catch((error) => {
+      setStatus("Generated image move failed", error.message || "Could not move the image file.");
+    });
 }
 
 function addGeneratedImageToLibrary(book, page, result, prompt, notes) {
@@ -3549,10 +3770,10 @@ refs.fullBookPreview.addEventListener("click", (event) => {
     const pairIds = pairLinkButton.dataset.linkPreviewPages.split(",").filter(Boolean);
     const pairPages = pairIds.map((id) => activeBook().pages.find((page) => page.id === id));
     if (pairPages.length === 2 && areFacingPages(activeBook(), pairPages[0], pairPages[1])) {
-      const alreadyLinked = selectedPreviewPageIds.length === 2
-        && pairIds.every((id) => selectedPreviewPageIds.includes(id));
+      const alreadyLinked = hasLinkedPagePair(activeBook(), pairIds[0], pairIds[1]);
       if (alreadyLinked) resetTwoPageLayouts(pairIds);
-      selectedPreviewPageIds = alreadyLinked ? [pairIds[0]] : pairIds;
+      toggleLinkedPagePair(activeBook(), pairIds[0], pairIds[1]);
+      selectedPreviewPageIds = [...pairIds];
       activeBook().activePageId = pairIds[0];
       saveState();
       render();
@@ -3562,11 +3783,8 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   const focusPageButton = event.target.closest("[data-focus-preview-page]");
   if (focusPageButton) {
     const focusPageId = focusPageButton.dataset.focusPreviewPage;
-    if (selectedPreviewPageIds.length === 2 && !selectedPreviewPageIds.includes(focusPageId)) {
-      resetTwoPageLayouts(selectedPreviewPageIds);
-    }
     activeBook().activePageId = focusPageId;
-    if (!selectedPreviewPageIds.includes(focusPageId)) selectedPreviewPageIds = [focusPageId];
+    selectedPreviewPageIds = previewSelectionForPage(activeBook(), focusPageId);
     saveState();
     render();
     return;
@@ -3574,13 +3792,20 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   const selectionButton = event.target.closest("[data-toggle-preview-selection]");
   if (selectionButton) {
     const selectedPageId = selectionButton.dataset.togglePreviewSelection;
+    const linkedSelection = previewSelectionForPage(activeBook(), selectedPageId);
+    if (linkedSelection.length === 2) {
+      selectedPreviewPageIds = linkedSelection;
+      activeBook().activePageId = selectedPageId;
+      saveState();
+      render();
+      return;
+    }
     const wasSelected = selectedPreviewPageIds.includes(selectedPageId);
-    if (selectedPreviewPageIds.length === 2) resetTwoPageLayouts(selectedPreviewPageIds);
+    const selectedPage = activeBook().pages.find((page) => page.id === selectedPageId);
+    const currentPage = activeBook().pages.find((page) => page.id === selectedPreviewPageIds[0]);
     if (wasSelected) {
       selectedPreviewPageIds = selectedPreviewPageIds.filter((id) => id !== selectedPageId);
     } else {
-      const currentPage = activeBook().pages.find((page) => page.id === selectedPreviewPageIds[0]);
-      const selectedPage = activeBook().pages.find((page) => page.id === selectedPageId);
       selectedPreviewPageIds = currentPage && areFacingPages(activeBook(), currentPage, selectedPage)
         ? [currentPage.id, selectedPage.id]
         : [selectedPageId];
@@ -3598,7 +3823,13 @@ refs.fullBookPreview.addEventListener("click", (event) => {
       (item) => item.dataset.generatedImagePicker === targetPageId,
     );
     if (picker) {
-      picker.hidden = !picker.hidden;
+      const willOpen = picker.hidden;
+      picker.hidden = !willOpen;
+      if (willOpen) {
+        openGeneratedImagePickerPageIds.add(targetPageId);
+      } else {
+        openGeneratedImagePickerPageIds.delete(targetPageId);
+      }
       imagePickerButton.setAttribute("aria-expanded", String(!picker.hidden));
       if (!picker.hidden) picker.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
@@ -3610,6 +3841,11 @@ refs.fullBookPreview.addEventListener("click", (event) => {
       generatedImageButton.dataset.useGeneratedImageId,
       generatedImageButton.dataset.targetPageId || pageId,
     );
+    return;
+  }
+  const deleteGeneratedImageButton = event.target.closest("[data-delete-generated-image-id]");
+  if (deleteGeneratedImageButton) {
+    deleteGeneratedImage(deleteGeneratedImageButton.dataset.deleteGeneratedImageId, pageId);
     return;
   }
   const generateButton = event.target.closest("[data-generate-page-id]");
@@ -3812,7 +4048,7 @@ refs.pageList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-page-id]");
   if (!button) return;
   activeBook().activePageId = button.dataset.pageId;
-  selectedPreviewPageIds = [button.dataset.pageId];
+  selectedPreviewPageIds = previewSelectionForPage(activeBook(), button.dataset.pageId);
   saveState();
   render();
 });
@@ -3993,6 +4229,8 @@ async function bootstrap() {
   if (!activeBook().activePageId || !activeBook().pages.some((page) => page.id === activeBook().activePageId)) {
     activeBook().activePageId = activeBook().pages[0]?.id || "";
   }
+  selectedPreviewPageIds = normalizeSelectedPreviewPageIds(state.selectedPreviewPageIds, activeBook());
+  state.selectedPreviewPageIds = [...selectedPreviewPageIds];
   if (outputImages.length) {
     activeBook().imageLibrary = normalizeGeneratedImageLibrary(
       [...outputImages, ...(activeBook().imageLibrary || [])],

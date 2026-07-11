@@ -2219,10 +2219,13 @@ function renderContextualPreviewToolbar(book, pages) {
   const pageIds = targetPages.map((page) => page.id).join(",");
   const sourcePage = targetPages.find((page) => page.id === book.activePageId) || targetPages[0] || defaultPage();
   const isPair = targetPages.length === 2;
-  const spreadLayout = isPair && layoutMode(sourcePage.layout) === "spread";
+  const layoutPage = isPair ? targetPages[0] : sourcePage;
+  const layout = normalizeLayout(layoutPage.layout);
+  const spreadLayout = isPair && layoutMode(layout) === "spread";
   const imagePage = spreadLayout
-    ? (spreadTextSide(sourcePage.layout) === "right" ? targetPages[0] : targetPages[1])
+    ? (spreadTextSide(layout) === "right" ? targetPages[0] : targetPages[1])
     : sourcePage;
+  const imagePageId = escapeHtml(imagePage.id);
   const layoutOptions = isPair ? TWO_PAGE_LAYOUT_OPTIONS : SINGLE_PAGE_LAYOUT_OPTIONS;
   const hasImage = targetPages.some((page) => page.imageUrl);
   const isGeneratingSourcePage = state.isGenerating && (state.generatingPageId || book.activePageId) === imagePage.id;
@@ -2234,7 +2237,7 @@ function renderContextualPreviewToolbar(book, pages) {
       </div>
       <div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Layout</span>
-        ${renderPreviewLayoutToolbar(sourcePage.layout, pageIds, layoutOptions)}
+        ${renderPreviewLayoutToolbar(layout, pageIds, layoutOptions)}
       </div>
       <div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Text</span>
@@ -2255,15 +2258,15 @@ function renderContextualPreviewToolbar(book, pages) {
         <span class="contextual-toolbar-label">Image</span>
         ${renderPageActions(book, imagePage, isGeneratingSourcePage)}
         <div class="page-image-nudge-group">
-          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="up" aria-label="Move image up" title="Move image up"${hasImage ? "" : " disabled"}>&#8593;</button>
-          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="left" aria-label="Move image left" title="Move image left"${hasImage ? "" : " disabled"}>&#8592;</button>
-          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-reset-position="true" aria-label="Center image" title="Center image"${hasImage ? "" : " disabled"}>&#10226;</button>
-          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="right" aria-label="Move image right" title="Move image right"${hasImage ? "" : " disabled"}>&#8594;</button>
-          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-image-nudge="down" aria-label="Move image down" title="Move image down"${hasImage ? "" : " disabled"}>&#8595;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-page-id="${imagePageId}" data-image-nudge="up" aria-label="Move image up" title="Move image up"${hasImage ? "" : " disabled"}>&#8593;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-page-id="${imagePageId}" data-image-nudge="left" aria-label="Move image left" title="Move image left"${hasImage ? "" : " disabled"}>&#8592;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-page-id="${imagePageId}" data-image-reset-position="true" aria-label="Center image" title="Center image"${hasImage ? "" : " disabled"}>&#10226;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-page-id="${imagePageId}" data-image-nudge="right" aria-label="Move image right" title="Move image right"${hasImage ? "" : " disabled"}>&#8594;</button>
+          <button class="ghost-button icon-button page-image-nudge-button" type="button" data-page-id="${imagePageId}" data-image-nudge="down" aria-label="Move image down" title="Move image down"${hasImage ? "" : " disabled"}>&#8595;</button>
         </div>
         <div class="page-image-scale-group">
-          <button class="ghost-button icon-button" type="button" data-image-scale-step="-0.12" aria-label="Scale image smaller" title="Scale image smaller"${hasImage ? "" : " disabled"}>&#8722;</button>
-          <button class="ghost-button icon-button" type="button" data-image-scale-step="0.12" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
+          <button class="ghost-button icon-button" type="button" data-page-id="${imagePageId}" data-image-scale-step="-0.12" aria-label="Scale image smaller" title="Scale image smaller"${hasImage ? "" : " disabled"}>&#8722;</button>
+          <button class="ghost-button icon-button" type="button" data-page-id="${imagePageId}" data-image-scale-step="0.12" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
         </div>
         ${renderGeneratedImagePicker(book, imagePage)}
       </div>

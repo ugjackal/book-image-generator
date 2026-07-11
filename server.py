@@ -892,11 +892,13 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
                 continue
             normalized_pages.append(
                 {
+                    "id": str(page.get("id", "")).strip(),
                     "number": int(page.get("number", len(normalized_pages) + 1) or len(normalized_pages) + 1),
                     "text": str(page.get("text", "")).strip(),
                     "layout": str(page.get("layout", "")).strip(),
                     "fontPreset": str(page.get("fontPreset", "")).strip(),
                     "fontScale": page.get("fontScale", 1),
+                    "textHorizontalAlign": str(page.get("textHorizontalAlign", "")).strip(),
                     "textVerticalAlign": str(page.get("textVerticalAlign", "")).strip(),
                     "imageScale": page.get("imageScale", 1),
                     "imageOffsetX": page.get("imageOffsetX", 0),
@@ -904,6 +906,7 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
                     "imageUrl": str(page.get("imageUrl", "")).strip(),
                     "imageDataUrl": str(page.get("imageDataUrl", "")).strip(),
                     "fileName": str(page.get("fileName", "")).strip(),
+                    "linkedPairKey": str(page.get("linkedPairKey", "")).strip(),
                 }
             )
     return {
@@ -914,6 +917,7 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
         "backCoverSummary": str(book.get("backCoverSummary", "")).strip(),
         "coverPreviewUrl": str(book.get("coverPreviewUrl", "")).strip(),
         "coverReferenceUrl": str(book.get("coverReferenceUrl", "")).strip(),
+        "linkedPagePairs": book.get("linkedPagePairs", []) if isinstance(book.get("linkedPagePairs", []), list) else [],
         "pages": normalized_pages,
     }
 
@@ -1137,6 +1141,54 @@ def draw_centered_text_block(
     return total_height
 
 
+def draw_page_text_region(
+    text_region: Image.Image,
+    text: str,
+    *,
+    font_key: str,
+    font_scale: float,
+    audience: str,
+    horizontal_align: str = "center",
+    vertical_align: str = "center",
+    base_size: int = 42,
+    padding_x: int = 24,
+    padding_y: int = 18,
+    fill: tuple[int, int, int, int] = (58, 42, 31, 255),
+) -> None:
+    cleaned_text = str(text or "").strip()
+    if not cleaned_text:
+        return
+    draw = ImageDraw.Draw(text_region)
+    start_size = min(200, max(22, int(base_size * float(font_scale or 1))))
+    font, lines, spacing, total_height = fit_text_font(
+        draw,
+        cleaned_text,
+        font_key,
+        max_width=max(1, text_region.width - (padding_x * 2)),
+        max_height=max(1, text_region.height - (padding_y * 2)),
+        start_size=start_size,
+    )
+    _, text_height = text_block_metrics(draw, lines, font, spacing)
+    vertical = str(vertical_align or "center").strip()
+    horizontal = str(horizontal_align or "center").strip()
+    y = padding_y
+    if vertical == "center":
+        y = max(padding_y, int((text_region.height - text_height) / 2))
+    elif vertical == "bottom":
+        y = max(padding_y, text_region.height - text_height - padding_y)
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line or " ", font=font)
+        line_width = bbox[2] - bbox[0]
+        if horizontal == "left":
+            x = padding_x
+        elif horizontal == "right":
+            x = max(padding_x, text_region.width - padding_x - line_width)
+        else:
+            x = max(padding_x, int((text_region.width - line_width) / 2))
+        draw.text((x, y), line, font=font, fill=fill)
+        y += (bbox[3] - bbox[1]) + spacing
+
+
 def render_cover_page(book: dict[str, Any]) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
@@ -1147,6 +1199,7 @@ def render_cover_page(book: dict[str, Any]) -> Image.Image:
 
     if cover_image is not None:
         paste_fitted_image(canvas, cover_image, (0, 0, page_w, page_h), scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
+        return canvas.convert("RGB")
     else:
         draw = ImageDraw.Draw(canvas)
         draw.rectangle((0, 0, page_w, page_h), fill=(250, 242, 232, 255))
@@ -1240,6 +1293,93 @@ def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
     return canvas.convert("RGB")
 
 
+def linked_pair_key(first_page_id: str, second_page_id: str) -> str:
+    return ",".join(sorted([str(first_page_id or "").strip(), str(second_page_id or "").strip()]))
+
+
+def has_linked_page_pair(book: dict[str, Any], first_page: dict[str, Any], second_page: dict[str, Any]) -> bool:
+    first_id = str(first_page.get("id", "")).strip()
+    second_id = str(second_page.get("id", "")).strip()
+    if not first_id or not second_id:
+        return False
+    key = linked_pair_key(first_id, second_id)
+    pairs = book.get("linkedPagePairs", [])
+    if isinstance(pairs, list):
+        for pair in pairs:
+            if not isinstance(pair, list) or len(pair) < 2:
+                continue
+            if linked_pair_key(str(pair[0]), str(pair[1])) == key:
+                return True
+    return str(first_page.get("linkedPairKey", "")).strip() == key and str(second_page.get("linkedPairKey", "")).strip() == key
+
+
+def linked_spread_role(layout: str, is_left_page: bool) -> str:
+    normalized = str(layout or "").strip()
+    if normalized == "spread-text-left":
+        return "text" if is_left_page else "image"
+    if normalized == "spread-image-left":
+        return "image" if is_left_page else "text"
+    return "text-and-image"
+
+
+def render_pdf_text_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
+    draw = ImageDraw.Draw(canvas)
+    margin_x = max(70, int(page_w * 0.12))
+    margin_y = max(64, int(page_h * 0.12))
+    text_box = (margin_x, margin_y, page_w - margin_x, page_h - margin_y)
+    draw.rounded_rectangle(text_box, radius=22, fill=(255, 252, 248, 255), outline=(231, 215, 200, 255), width=1)
+
+    text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), (0, 0, 0, 0))
+    font_key = str(page.get("fontPreset", "")).strip() or "storybook-serif"
+    font_scale = float(page.get("fontScale", 1) or 1)
+    draw_page_text_region(
+        text_region,
+        str(page.get("text", "")).strip(),
+        font_key=font_key,
+        font_scale=font_scale,
+        audience=str(book.get("audience", "")),
+        horizontal_align=str(page.get("textHorizontalAlign", "")).strip() or "center",
+        vertical_align=str(page.get("textVerticalAlign", "")).strip() or "center",
+        base_size=56 if book.get("audience") in {"3-5", "3-8"} else 44,
+        padding_x=28,
+        padding_y=24,
+    )
+    canvas.alpha_composite(text_region, (text_box[0], text_box[1]))
+    return canvas.convert("RGB")
+
+
+def render_pdf_image_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    canvas = Image.new("RGBA", (page_w, page_h), (250, 244, 236, 255))
+    image = open_image_reference(str(page.get("imageDataUrl") or page.get("imageUrl") or ""))
+    paste_fitted_image(
+        canvas,
+        image,
+        (0, 0, page_w, page_h),
+        scale=float(page.get("imageScale", 1) or 1),
+        offset_x=float(page.get("imageOffsetX", 0) or 0),
+        offset_y=float(page.get("imageOffsetY", 0) or 0),
+        fill=(250, 244, 236, 255),
+    )
+    if image is None:
+        draw_placeholder(canvas, (0, 0, page_w, page_h))
+    return canvas.convert("RGB")
+
+
+def render_linked_spread_pdf_page(book: dict[str, Any], page: dict[str, Any], role: str) -> Image.Image:
+    if role == "text":
+        return render_pdf_text_page(book, page)
+    if role == "image":
+        return render_pdf_image_page(book, page)
+    return render_pdf_page(book, page)
+
+
 def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
@@ -1252,7 +1392,8 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
     text = str(page.get("text", "")).strip()
     font_key = str(page.get("fontPreset", "")).strip() or "storybook-serif"
     font_scale = float(page.get("fontScale", 1) or 1)
-    text_align = str(page.get("textVerticalAlign", "")).strip() or "top"
+    text_vertical_align = str(page.get("textVerticalAlign", "")).strip() or "top"
+    text_horizontal_align = str(page.get("textHorizontalAlign", "")).strip() or "center"
     image = open_image_reference(str(page.get("imageDataUrl") or page.get("imageUrl") or ""))
 
     outer_margin_x = max(48, int(page_w * 0.06))
@@ -1286,28 +1427,18 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         if image is None:
             draw_placeholder(canvas, image_box)
         text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), text_fill)
-        region_draw = ImageDraw.Draw(text_region)
-        start_size = min(200, max(22, int((54 if book.get("audience") in {"3-5", "3-8"} else 42) * font_scale)))
-        font, lines, spacing, total_height = fit_text_font(
-            region_draw,
+        draw_page_text_region(
+            text_region,
             text,
-            font_key,
-            max_width=max(1, text_region.width - 18),
-            max_height=max(1, text_region.height - 18),
-            start_size=start_size,
+            font_key=font_key,
+            font_scale=font_scale,
+            audience=str(book.get("audience", "")),
+            horizontal_align=text_horizontal_align,
+            vertical_align=text_vertical_align,
+            base_size=54 if book.get("audience") in {"3-5", "3-8"} else 42,
+            padding_x=10,
+            padding_y=10,
         )
-        if text:
-            _, text_height = text_block_metrics(region_draw, lines, font, spacing)
-            y = 10
-            if text_align == "center":
-                y = max(10, int((text_region.height - text_height) / 2))
-            elif text_align == "bottom":
-                y = max(10, text_region.height - text_height - 10)
-            x = 10
-            for line in lines:
-                region_draw.text((x, y), line, font=font, fill=(58, 42, 31, 255))
-                bbox = region_draw.textbbox((0, 0), line or " ", font=font)
-                y += (bbox[3] - bbox[1]) + spacing
         canvas.alpha_composite(text_region, (text_box[0], text_box[1]))
         return canvas.convert("RGB")
 
@@ -1345,34 +1476,18 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         overlay = Image.new("RGBA", (overlay_w, overlay_h), (255, 252, 248, 0))
         overlay_draw = ImageDraw.Draw(overlay)
         overlay_draw.rounded_rectangle((0, 0, overlay_w, overlay_h), radius=22, fill=(255, 253, 249, 212), outline=(229, 208, 189, 255), width=1)
-        start_size = min(200, max(22, int((50 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale)))
-        font, lines, spacing, total_height = fit_text_font(
-            overlay_draw,
+        draw_page_text_region(
+            overlay,
             text,
-            font_key,
-            max_width=max(1, overlay_w - 48),
-            max_height=max(1, overlay_h - 34),
-            start_size=start_size,
+            font_key=font_key,
+            font_scale=font_scale,
+            audience=str(book.get("audience", "")),
+            horizontal_align=text_horizontal_align,
+            vertical_align=text_vertical_align,
+            base_size=50 if book.get("audience") in {"3-5", "3-8"} else 40,
+            padding_x=24,
+            padding_y=16,
         )
-        if text:
-            _, text_height = text_block_metrics(overlay_draw, lines, font, spacing)
-            y = max(18, int((overlay_h - text_height) / 2))
-            if overlay_layout == "overlay-top":
-                y = 16
-            elif overlay_layout == "overlay-bottom":
-                y = max(16, overlay_h - text_height - 16)
-            for line in lines:
-                x = 24
-                if overlay_layout == "overlay-right":
-                    x = 20
-                    bbox = overlay_draw.textbbox((0, 0), line or " ", font=font)
-                    line_width = bbox[2] - bbox[0]
-                    x = max(20, overlay_w - 20 - line_width)
-                elif overlay_layout == "overlay-top" or overlay_layout == "overlay-bottom" or overlay_layout == "overlay-centered":
-                    x = 24
-                overlay_draw.text((x, y), line, font=font, fill=(58, 42, 31, 255))
-                bbox = overlay_draw.textbbox((0, 0), line or " ", font=font)
-                y += (bbox[3] - bbox[1]) + spacing
         canvas.alpha_composite(overlay, (overlay_x, overlay_y))
         return canvas.convert("RGB")
 
@@ -1389,27 +1504,18 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
         draw_placeholder(canvas, image_box)
 
     text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), (0, 0, 0, 0))
-    text_draw = ImageDraw.Draw(text_region)
-    start_size = min(200, max(22, int((52 if book.get("audience") in {"3-5", "3-8"} else 40) * font_scale)))
-    font, lines, spacing, total_height = fit_text_font(
-        text_draw,
+    draw_page_text_region(
+        text_region,
         text,
-        font_key,
-        max_width=max(1, text_region.width - 36),
-        max_height=max(1, text_region.height - 28),
-        start_size=start_size,
+        font_key=font_key,
+        font_scale=font_scale,
+        audience=str(book.get("audience", "")),
+        horizontal_align=text_horizontal_align,
+        vertical_align=text_vertical_align,
+        base_size=52 if book.get("audience") in {"3-5", "3-8"} else 40,
+        padding_x=18,
+        padding_y=14,
     )
-    if text:
-        _, text_height = text_block_metrics(text_draw, lines, font, spacing)
-        y = 14
-        if text_align == "center":
-            y = max(14, int((text_region.height - text_height) / 2))
-        elif text_align == "bottom":
-            y = max(14, text_region.height - text_height - 16)
-        for line in lines:
-            text_draw.text((18, y), line, font=font, fill=(58, 42, 31, 255))
-            bbox = text_draw.textbbox((0, 0), line or " ", font=font)
-            y += (bbox[3] - bbox[1]) + spacing
     canvas.alpha_composite(text_region, (text_box[0], text_box[1]))
     return canvas.convert("RGB")
 
@@ -1431,8 +1537,22 @@ def publish_book_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     rendered_pages: list[Image.Image] = []
     rendered_pages.append(render_cover_page(book))
     rendered_pages.append(render_copyright_page(book))
-    for page in pages:
+    page_index = 0
+    while page_index < len(pages):
+        page = pages[page_index]
+        next_page = pages[page_index + 1] if page_index + 1 < len(pages) else None
+        layout = str(page.get("layout", "")).strip()
+        if (
+            next_page is not None
+            and normalize_layout_mode(layout) == "spread"
+            and has_linked_page_pair(book, page, next_page)
+        ):
+            rendered_pages.append(render_linked_spread_pdf_page(book, page, linked_spread_role(layout, True)))
+            rendered_pages.append(render_linked_spread_pdf_page(book, next_page, linked_spread_role(layout, False)))
+            page_index += 2
+            continue
         rendered_pages.append(render_pdf_page(book, page))
+        page_index += 1
     rendered_pages.append(render_back_cover_page(book))
 
     first, *rest = rendered_pages

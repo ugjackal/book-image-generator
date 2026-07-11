@@ -1967,27 +1967,29 @@ function pageImageStyle(page) {
   const imageOffsetY = normalizeImageOffset(page.imageOffsetY);
   const naturalWidth = Number(page.imageNaturalWidth) || 0;
   const naturalHeight = Number(page.imageNaturalHeight) || 0;
+  const centerForAxis = (offset, renderedScale) => {
+    if (renderedScale <= 1) return "50%";
+    const edgeLimit = (renderedScale * 100) / 2;
+    return `clamp(calc(100% - ${edgeLimit}%), calc(50% + ${offset}px), ${edgeLimit}%)`;
+  };
   if (naturalWidth > 0 && naturalHeight > 0) {
     const frameAspect = printSizeAspect(page.printSize);
     const sourceAspect = naturalWidth / naturalHeight;
+    const widthScale = (sourceAspect > frameAspect ? sourceAspect / frameAspect : 1) * imageScale;
+    const heightScale = (sourceAspect > frameAspect ? 1 : frameAspect / sourceAspect) * imageScale;
+    const left = centerForAxis(imageOffsetX, widthScale);
+    const top = centerForAxis(imageOffsetY, heightScale);
     if (sourceAspect > frameAspect) {
-      return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:calc(100% * ${(sourceAspect / frameAspect) * imageScale});height:100%;max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+      return `left:${left};top:${top};width:calc(100% * ${widthScale});height:calc(100% * ${heightScale});max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
     }
-    return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:100%;height:calc(100% * ${(frameAspect / sourceAspect) * imageScale});max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+    return `left:${left};top:${top};width:calc(100% * ${widthScale});height:calc(100% * ${heightScale});max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
   }
-  return `left:calc(50% + ${imageOffsetX}px);top:calc(50% + ${imageOffsetY}px);width:100%;height:100%;max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
+  const fallbackScale = Math.max(1, imageScale);
+  return `left:${centerForAxis(imageOffsetX, fallbackScale)};top:${centerForAxis(imageOffsetY, fallbackScale)};width:calc(100% * ${fallbackScale});height:calc(100% * ${fallbackScale});max-width:none;max-height:none;transform:translate(-50%,-50%);object-fit:cover;object-position:center center;`;
 }
 
 function imageMinimumScale(page) {
-  const naturalWidth = Number(page?.imageNaturalWidth) || 0;
-  const naturalHeight = Number(page?.imageNaturalHeight) || 0;
-  if (naturalWidth <= 0 || naturalHeight <= 0) return IMAGE_MIN_PAN_SCALE;
-  const frameAspect = printSizeAspect(page.printSize);
-  const sourceAspect = naturalWidth / naturalHeight;
-  if (sourceAspect > frameAspect) {
-    return Math.max(IMAGE_MIN_PAN_SCALE, frameAspect / sourceAspect);
-  }
-  return Math.max(IMAGE_MIN_PAN_SCALE, sourceAspect / frameAspect);
+  return DEFAULT_IMAGE_SCALE;
 }
 
 function renderPageImageMarkup(page, isGeneratingPage) {
@@ -3965,10 +3967,16 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   if (imageScaleStepButton) {
     const step = Number(imageScaleStepButton.dataset.imageScaleStep || 0);
     updatePagesByIds(pageIdsFromControl(imageScaleStepButton, pageId), (page) => ({
-      imageScale: Math.max(
-        normalizeImageScale(normalizeImageScale(page.imageScale) + step),
-        imageMinimumScale(page),
-      ),
+      ...(() => {
+        const currentScale = Math.max(normalizeImageScale(page.imageScale), imageMinimumScale(page));
+        const nextScale = Math.max(normalizeImageScale(currentScale + step), imageMinimumScale(page));
+        const scaleRatio = currentScale > 0 ? nextScale / currentScale : 1;
+        return {
+          imageScale: nextScale,
+          imageOffsetX: normalizeImageOffset(normalizeImageOffset(page.imageOffsetX) * scaleRatio),
+          imageOffsetY: normalizeImageOffset(normalizeImageOffset(page.imageOffsetY) * scaleRatio),
+        };
+      })(),
     }));
   }
 });

@@ -27,6 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 PAGE_OUTPUT_DIR = OUTPUT_DIR / "pages"
 BOOK_OUTPUT_DIR = OUTPUT_DIR / "books"
+STUDIO_IMAGE_VIEWPORT_WIDTH = 372.0
 STATE_FILE = BASE_DIR / "data" / "studio-state.json"
 STATE_LOCK = threading.Lock()
 DEFAULT_MODEL = os.environ.get("OPENAI_TEXT_MODEL", "gpt-5.4")
@@ -910,11 +911,15 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     return {
+        "id": str(book.get("id", "")).strip(),
         "projectTitle": str(book.get("projectTitle", "")).strip(),
         "authorName": str(book.get("authorName", "")).strip(),
         "printSize": str(book.get("printSize", "")).strip(),
         "audience": str(book.get("audience", "")).strip(),
         "backCoverSummary": str(book.get("backCoverSummary", "")).strip(),
+        "backCoverPhotoUrl": str(book.get("backCoverPhotoUrl", "")).strip(),
+        "backCoverImageFileName": str(book.get("backCoverImageFileName", "")).strip(),
+        "backCoverPage": book.get("backCoverPage", {}) if isinstance(book.get("backCoverPage", {}), dict) else {},
         "coverPreviewUrl": str(book.get("coverPreviewUrl", "")).strip(),
         "coverReferenceUrl": str(book.get("coverReferenceUrl", "")).strip(),
         "linkedPagePairs": book.get("linkedPagePairs", []) if isinstance(book.get("linkedPagePairs", []), list) else [],
@@ -1053,6 +1058,7 @@ def paste_fitted_image(
     scale: float = 1.0,
     offset_x: float = 0.0,
     offset_y: float = 0.0,
+    fit_aspect: float | None = None,
     fill: tuple[int, int, int, int] = (250, 244, 236, 255),
 ) -> None:
     left, top, right, bottom = box
@@ -1064,15 +1070,87 @@ def paste_fitted_image(
         return
 
     source = image.convert("RGBA")
-    base_scale = max(box_w / max(1, source.width), box_h / max(1, source.height))
-    final_scale = max(0.12, float(scale or 1.0)) * base_scale
+    source_aspect = source.width / max(1, source.height)
+    basis_aspect = float(fit_aspect or 0) if fit_aspect else box_w / max(1, box_h)
+    if basis_aspect <= 0:
+        basis_aspect = box_w / max(1, box_h)
+    contain_display_scale = 0.5
+    display_scale = max(0.2, min(2.0, float(scale or 1.0)))
+    cover_width_scale = source_aspect / basis_aspect if source_aspect > basis_aspect else 1.0
+    cover_height_scale = 1.0 if source_aspect > basis_aspect else basis_aspect / max(source_aspect, 0.0001)
+    contain_width_scale = 1.0 if source_aspect > basis_aspect else source_aspect / basis_aspect
+    contain_height_scale = basis_aspect / source_aspect if source_aspect > basis_aspect else 1.0
+    if display_scale >= 1:
+        width_scale = cover_width_scale * display_scale
+        height_scale = cover_height_scale * display_scale
+    elif display_scale >= contain_display_scale:
+        blend = max(0.0, min(1.0, (display_scale - contain_display_scale) / (1.0 - contain_display_scale)))
+        width_scale = contain_width_scale + ((cover_width_scale - contain_width_scale) * blend)
+        height_scale = contain_height_scale + ((cover_height_scale - contain_height_scale) * blend)
+    else:
+        shrink = max(0.1, display_scale / contain_display_scale)
+        width_scale = contain_width_scale * shrink
+        height_scale = contain_height_scale * shrink
+    element_w = max(1, int(box_w * width_scale))
+    element_h = max(1, int(box_h * height_scale))
+    base_scale = max(element_w / max(1, source.width), element_h / max(1, source.height))
+    final_scale = base_scale
     render_w = max(1, int(source.width * final_scale))
     render_h = max(1, int(source.height * final_scale))
     resized = source.resize((render_w, render_h), PIL_LANCZOS)
-    paste_x = int((box_w / 2) + float(offset_x or 0) - (render_w / 2))
-    paste_y = int((box_h / 2) + float(offset_y or 0) - (render_h / 2))
+    offset_scale = box_w / STUDIO_IMAGE_VIEWPORT_WIDTH if STUDIO_IMAGE_VIEWPORT_WIDTH > 0 else 1.0
+
+    def clamped_center(axis_size: int, rendered_scale: float, offset: float) -> float:
+        if rendered_scale <= 1:
+            return axis_size / 2
+        edge_limit = (rendered_scale * axis_size) / 2
+        lower = axis_size - edge_limit
+        upper = edge_limit
+        ideal = (axis_size / 2) + (float(offset or 0) * offset_scale)
+        return max(lower, min(upper, ideal))
+
+    center_x = clamped_center(box_w, width_scale, float(offset_x or 0))
+    center_y = clamped_center(box_h, height_scale, float(offset_y or 0))
+    element_x = int(center_x - (element_w / 2))
+    element_y = int(center_y - (element_h / 2))
+    paste_x = element_x + int((element_w - render_w) / 2)
+    paste_y = element_y + int((element_h - render_h) / 2)
     layer.paste(resized, (paste_x, paste_y), resized)
     canvas.alpha_composite(layer, (int(left), int(top)))
+
+
+def draw_rounded_image(
+    canvas: Image.Image,
+    image: Image.Image | None,
+    box: tuple[int, int, int, int],
+    *,
+    radius: int = 24,
+    outline: tuple[int, int, int, int] = (233, 211, 192, 255),
+    width: int = 3,
+    crop_focus_x: float = 0.5,
+    crop_focus_y: float = 0.5,
+) -> None:
+    if image is None:
+        return
+    left, top, right, bottom = box
+    box_w = max(1, right - left)
+    box_h = max(1, bottom - top)
+    source = image.convert("RGBA")
+    scale = max(box_w / max(1, source.width), box_h / max(1, source.height))
+    resized = source.resize((max(1, int(source.width * scale)), max(1, int(source.height * scale))), PIL_LANCZOS)
+    overflow_x = max(0, resized.width - box_w)
+    overflow_y = max(0, resized.height - box_h)
+    crop_left = max(0, min(overflow_x, int(overflow_x * max(0.0, min(1.0, crop_focus_x)))))
+    crop_top = max(0, min(overflow_y, int(overflow_y * max(0.0, min(1.0, crop_focus_y)))))
+    cropped = resized.crop((crop_left, crop_top, crop_left + box_w, crop_top + box_h))
+    mask = Image.new("L", (box_w, box_h), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((0, 0, box_w, box_h), radius=radius, fill=255)
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    layer.paste(cropped, (left, top), mask)
+    canvas.alpha_composite(layer)
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle((left, top, right, bottom), radius=radius, outline=outline, width=width)
 
 
 def draw_placeholder(canvas: Image.Image, box: tuple[int, int, int, int], label: str = "No image yet") -> None:
@@ -1259,38 +1337,30 @@ def render_copyright_page(book: dict[str, Any]) -> Image.Image:
         ]
     )
     box = (margin_x + 28, margin_y + 26, page_w - margin_x - 28, page_h - margin_y - 26)
-    draw_centered_text_block(canvas, "\n".join(lines), box, start_size=30, min_size=18, fill=(58, 42, 31, 255))
+    draw_centered_text_block(canvas, "\n".join(lines), box, start_size=60, min_size=36, fill=(58, 42, 31, 255))
     return canvas.convert("RGB")
 
 
 def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
-    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
-    page_w = int(width)
-    page_h = int(height)
-    canvas = Image.new("RGBA", (page_w, page_h), (250, 242, 232, 255))
-    cover_reference = str(book.get("coverPreviewUrl") or book.get("coverReferenceUrl") or "").strip()
-    cover_image = open_image_reference(cover_reference)
-    if cover_image is not None:
-        paste_fitted_image(canvas, cover_image, (0, 0, page_w, page_h), scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
-    overlay = Image.new("RGBA", (page_w, page_h), (0, 0, 0, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    panel_w = max(340, int(page_w * 0.72))
-    panel_h = max(220, int(page_h * 0.44))
-    panel_x = int((page_w - panel_w) / 2)
-    panel_y = int((page_h - panel_h) / 2)
-    overlay_draw.rounded_rectangle(
-        (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
-        radius=24,
-        fill=(255, 252, 248, 220),
-        outline=(233, 211, 192, 230),
-        width=1,
-    )
-    summary = str(book.get("backCoverSummary") or "").strip()
-    if not summary:
-        summary = "A warm picture-book story brought to life in Whoka Story Studio."
-    draw_centered_text_block(overlay, summary, (panel_x + 28, panel_y + 22, panel_x + panel_w - 28, panel_y + panel_h - 22), start_size=34, min_size=18, fill=(58, 42, 31, 255))
-    canvas.alpha_composite(overlay)
-    return canvas.convert("RGB")
+    back_cover_page = book.get("backCoverPage", {}) if isinstance(book.get("backCoverPage", {}), dict) else {}
+    page = {
+        "id": "__back_cover__",
+        "number": len(book.get("pages", [])) + 1 if isinstance(book.get("pages", []), list) else 1,
+        "text": str(back_cover_page.get("text") or book.get("backCoverSummary") or "").strip()
+        or "A warm picture-book story brought to life in Whoka Story Studio.",
+        "layout": str(back_cover_page.get("layout") or "stacked-image-top").strip(),
+        "fontPreset": str(back_cover_page.get("fontPreset") or "storybook-serif").strip(),
+        "fontScale": back_cover_page.get("fontScale", 1),
+        "textHorizontalAlign": str(back_cover_page.get("textHorizontalAlign") or "center").strip(),
+        "textVerticalAlign": str(back_cover_page.get("textVerticalAlign") or "top").strip(),
+        "imageScale": back_cover_page.get("imageScale", 1),
+        "imageOffsetX": back_cover_page.get("imageOffsetX", 0),
+        "imageOffsetY": back_cover_page.get("imageOffsetY", 0),
+        "imageUrl": str(back_cover_page.get("imageDataUrl") or back_cover_page.get("imageUrl") or book.get("backCoverPhotoUrl") or "").strip(),
+        "imageDataUrl": str(back_cover_page.get("imageDataUrl") or "").strip(),
+        "fileName": str(back_cover_page.get("fileName") or book.get("backCoverImageFileName") or "").strip(),
+    }
+    return render_pdf_text_page(book, page)
 
 
 def linked_pair_key(first_page_id: str, second_page_id: str) -> str:
@@ -1384,6 +1454,8 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
     page_h = int(height)
+    preview_width, preview_height = size_for_print_size(str(page.get("printSize", "")).strip()).split("x")
+    preview_aspect = int(preview_width) / max(1, int(preview_height))
     canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
     draw = ImageDraw.Draw(canvas)
 
@@ -1520,10 +1592,32 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
     return canvas.convert("RGB")
 
 
+def saved_back_cover_photo_url(book_id: str) -> str:
+    try:
+        with STATE_FILE.open("r", encoding="utf-8") as handle:
+            state = json.load(handle)
+    except Exception:
+        return ""
+    books = state.get("books", [])
+    if not isinstance(books, list):
+        return ""
+    active_book_id = str(state.get("activeBookId", "")).strip()
+    target_id = str(book_id or active_book_id).strip()
+    for saved_book in books:
+        if not isinstance(saved_book, dict):
+            continue
+        if target_id and str(saved_book.get("id", "")).strip() != target_id:
+            continue
+        return str(saved_book.get("backCoverPhotoUrl", "")).strip()
+    return ""
+
+
 def publish_book_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     book = normalize_pdf_book_state(payload)
     if not book:
         raise ValueError("Missing book payload.")
+    if not str(book.get("backCoverPhotoUrl", "")).strip():
+        book["backCoverPhotoUrl"] = saved_back_cover_photo_url(str(book.get("id", "")).strip())
     pages = book.get("pages", [])
     if not pages:
         raise ValueError("No pages available to publish.")

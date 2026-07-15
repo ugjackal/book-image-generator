@@ -9,10 +9,12 @@ const DEFAULT_PAGE_TEXT_HORIZONTAL = "center";
 const DEFAULT_PAGE_TEXT_SPACE = "Leave a calm open area for real page text";
 const DEFAULT_IMAGE_SCALE = 1;
 const DEFAULT_IMAGE_OFFSET = 0;
+const BACK_COVER_PAGE_ID = "__back_cover__";
 const IMAGE_OFFSET_MIN = -100;
 const IMAGE_OFFSET_MAX = 100;
 const IMAGE_NUDGE_STEP = 10;
-const IMAGE_MIN_PAN_SCALE = 0.7;
+const IMAGE_MIN_PAN_SCALE = 0.2;
+const IMAGE_CONTAIN_SCALE = 0.5;
 const PRINT_SIZES = {
   "landscape-10x8": { label: "Landscape picture book 12 x 8 in", width: 3600, height: 2400, aspect: 1.5 },
   "portrait-8x10": { label: "Portrait picture book 8 x 12 in", width: 2400, height: 3600, aspect: 0.6666667 },
@@ -185,6 +187,14 @@ const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
 
 const defaultBook = (title = "Untitled Book") => {
   const firstPage = defaultPage(1);
+  const backCoverPage = defaultPage(2);
+  Object.assign(backCoverPage, {
+    id: BACK_COVER_PAGE_ID,
+    number: 2,
+    text: "",
+    layout: "stacked-image-top",
+    textSpace: defaultTextSpaceForLayout("stacked-image-top"),
+  });
   return {
     id: makeId(),
     projectTitle: title,
@@ -193,6 +203,9 @@ const defaultBook = (title = "Untitled Book") => {
     coverPreviewUrl: "",
     coverReferenceUrl: "",
     backCoverSummary: "",
+    backCoverImageFileName: "",
+    backCoverPhotoUrl: "",
+    backCoverPage,
     audience: "3-8",
     suggestedPageCount: "",
     manuscript: "",
@@ -248,6 +261,9 @@ const legacyBookFromState = (parsed) => {
     coverPreviewUrl: parsed.coverPreviewUrl || "",
     coverReferenceUrl: parsed.coverReferenceUrl || "",
     backCoverSummary: parsed.backCoverSummary || "",
+    backCoverImageFileName: parsed.backCoverImageFileName || "",
+    backCoverPhotoUrl: parsed.backCoverPhotoUrl || "",
+    backCoverPage: parsed.backCoverPage || {},
     audience: parsed.audience || "3-8",
     suggestedPageCount: parsed.suggestedPageCount || "",
     manuscript: parsed.manuscript || "",
@@ -428,7 +444,10 @@ function normalizeBook(book) {
     printSize: normalizePrintSize(book.printSize),
     pages,
   };
-  if (!normalized.activePageId || !normalized.pages.some((page) => page.id === normalized.activePageId)) {
+  normalized.backCoverPage = normalizeBackCoverPage(book.backCoverPage || {}, normalized);
+  syncBackCoverPageFields(normalized);
+  normalized.manuscript = ensureBackCoverSection(normalized.manuscript, normalized.backCoverSummary);
+  if (!normalized.activePageId || (!normalized.pages.some((page) => page.id === normalized.activePageId) && !isBackCoverPageId(normalized.activePageId))) {
     normalized.activePageId = normalized.pages[0]?.id || "";
   }
   normalized.pages = normalized.pages.map((page) => ({
@@ -487,6 +506,7 @@ function hasLinkedPagePair(book, firstPageId, secondPageId) {
 }
 
 function previewSelectionForPage(book, pageId) {
+  if (isBackCoverPageId(pageId)) return [BACK_COVER_PAGE_ID];
   const pages = Array.isArray(book?.pages) ? book.pages : [];
   const pageIndex = pages.findIndex((page) => page.id === pageId);
   if (pageIndex < 0) return [];
@@ -586,6 +606,52 @@ function normalizePages(pages) {
     imageNaturalHeight: Number(page?.imageNaturalHeight) || 0,
     textSpace: resolvedTextSpaceForPage(page),
   }));
+}
+
+function normalizeBackCoverPage(page = {}, book = {}) {
+  const source = page && typeof page === "object" ? page : {};
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const normalized = {
+    ...defaultPage((Array.isArray(book.pages) ? book.pages.length : 1) + 1, "stacked-image-top"),
+    ...source,
+  };
+  normalized.id = BACK_COVER_PAGE_ID;
+  normalized.number = (Array.isArray(book.pages) ? book.pages.length : 1) + 1;
+  normalized.text = String(hasOwn("text") ? normalized.text || "" : book.backCoverSummary || "").trim();
+  normalized.layout = normalizeLayout(normalized.layout || "stacked-image-top");
+  normalized.fontPreset = normalizeFontPreset(normalized.fontPreset);
+  normalized.fontScale = normalizeTextScale(normalized.fontScale);
+  normalized.textHorizontalAlign = normalizeTextHorizontalAlign(normalized.textHorizontalAlign);
+  normalized.textVerticalAlign = normalizeTextVerticalAlign(normalized.textVerticalAlign);
+  normalized.imageScale = normalizeImageScale(normalized.imageScale);
+  normalized.imageOffsetX = normalizeImageOffset(normalized.imageOffsetX);
+  normalized.imageOffsetY = normalizeImageOffset(normalized.imageOffsetY);
+  normalized.imageNaturalWidth = Number(normalized.imageNaturalWidth) || 0;
+  normalized.imageNaturalHeight = Number(normalized.imageNaturalHeight) || 0;
+  normalized.imageUrl = normalized.imageDataUrl || normalized.imageUrl || (hasOwn("imageUrl") || hasOwn("imageDataUrl") ? "" : book.backCoverPhotoUrl || "");
+  normalized.fileName = normalized.fileName || (hasOwn("fileName") ? "" : book.backCoverImageFileName || "");
+  normalized.imageSource = normalized.imageSource || (normalized.imageUrl ? "uploaded" : "");
+  normalized.textSpace = isOverlayLayout(normalized.layout) ? resolvedTextSpaceForPage(normalized) : "";
+  return normalized;
+}
+
+function syncBackCoverPageFields(book) {
+  book.backCoverPage = normalizeBackCoverPage(book.backCoverPage, book);
+  book.backCoverSummary = String(book.backCoverPage.text || "").trim();
+  book.backCoverPhotoUrl = book.backCoverPage.imageUrl || "";
+  book.backCoverImageFileName = book.backCoverPage.fileName || "";
+}
+
+function isBackCoverPageId(pageId) {
+  return String(pageId || "") === BACK_COVER_PAGE_ID;
+}
+
+function editablePageById(book, pageId) {
+  if (isBackCoverPageId(pageId)) {
+    syncBackCoverPageFields(book);
+    return book.backCoverPage;
+  }
+  return book.pages.find((page) => page.id === pageId);
 }
 
 function normalizePrintSize(printSize) {
@@ -1475,7 +1541,7 @@ function activeBook() {
 
 function activePage() {
   const book = activeBook();
-  return book.pages.find((page) => page.id === book.activePageId) || book.pages[0];
+  return editablePageById(book, book.activePageId) || book.pages[0];
 }
 
 function setStatus(label, detail) {
@@ -1584,7 +1650,7 @@ function render() {
   refs.backCoverSummary.value = book.backCoverSummary || "";
   refs.audienceSelect.value = book.audience || "3-8";
   syncPageCountControl(book);
-  refs.storyManuscript.value = book.manuscript || "";
+  refs.storyManuscript.value = ensureBackCoverSection(book.manuscript, book.backCoverSummary);
   refs.buildPagesButton.textContent = book.pages.length ? "Rebuild page drafts" : "Create page drafts";
   refs.sceneDescription.value = page.sceneDescription;
   refs.pageCharacters.value = page.characters;
@@ -1593,11 +1659,12 @@ function render() {
   refs.pageLighting.value = page.lighting;
   refs.textSpace.value = resolvedTextSpaceForPage(page);
   refs.composition.value = page.composition;
-  if (refs.activePageLabel) refs.activePageLabel.textContent = `Page ${page.number}`;
+  if (refs.activePageLabel) refs.activePageLabel.textContent = isBackCoverPageId(page.id) ? "Back Cover" : `Page ${page.number}`;
   refs.promptOutput.value = page.prompt || "";
   refs.updatePromptButton.disabled = false;
   refs.copyPromptButton.disabled = !page.prompt;
-  refs.deletePageButton.disabled = book.pages.length <= 1;
+  refs.duplicatePageButton.disabled = isBackCoverPageId(page.id);
+  refs.deletePageButton.disabled = book.pages.length <= 1 || isBackCoverPageId(page.id);
   if (refs.publishBookButton) {
     refs.publishBookButton.disabled = !book.pages.length || bookPublishing;
     refs.publishBookButton.textContent = bookPublishing ? "Publishing..." : "Publish";
@@ -1651,7 +1718,7 @@ function renderAuthorSelect() {
 
 function renderPageList() {
   const book = activeBook();
-  refs.pageList.innerHTML = book.pages
+  const pageItems = book.pages
     .map((page) => {
       const selected = page.id === book.activePageId ? " is-active" : "";
       const title = page.text.trim() || page.sceneDescription.trim() || "Untitled page";
@@ -1668,6 +1735,17 @@ function renderPageList() {
       `;
     })
     .join("");
+  const backCoverTitle = book.backCoverSummary?.trim() || "Back cover note";
+  const backCoverStatus = book.backCoverPhotoUrl ? "Photo attached" : "No back cover image";
+  refs.pageList.innerHTML = `${pageItems}
+    <button class="page-list-item back-cover-page-list-item${isBackCoverPageId(book.activePageId) ? " is-active" : ""}" type="button" data-back-cover-list-item="true">
+      <span class="page-number">BC</span>
+      <span class="page-list-copy">
+        <strong>${escapeHtml(backCoverTitle)}</strong>
+        <small>Back Cover - ${escapeHtml(backCoverStatus)}</small>
+      </span>
+    </button>
+  `;
 }
 
 function normalizeCharacterRecord(character = {}) {
@@ -1912,6 +1990,7 @@ function renderFullBookPreview() {
     block: "nearest",
     inline: "center",
   });
+  requestAnimationFrame(() => syncImageFrameAspects(book));
 }
 
 function renderBookPreview() {
@@ -1922,7 +2001,7 @@ function renderBookPreview() {
 const pendingImageDimensionLoads = new Set();
 
 function syncMissingPageImageDimensions(book) {
-  const pages = Array.isArray(book?.pages) ? book.pages : [];
+  const pages = [...(Array.isArray(book?.pages) ? book.pages : []), book?.backCoverPage].filter(Boolean);
   pages
     .filter((page) => page?.imageUrl && (!Number(page.imageNaturalWidth) || !Number(page.imageNaturalHeight)))
     .forEach((page) => {
@@ -1957,6 +2036,23 @@ function syncMissingPageImageDimensions(book) {
     });
 }
 
+function syncImageFrameAspects(book) {
+  const pages = [...(Array.isArray(book?.pages) ? book.pages : []), book?.backCoverPage].filter(Boolean);
+  refs.fullBookPreview.querySelectorAll(".page-art-frame[data-page-id]").forEach((frame) => {
+    const page = pages.find((item) => item.id === frame.dataset.pageId);
+    if (!page) return;
+    const width = frame.clientWidth || 0;
+    const height = frame.clientHeight || 0;
+    if (!width || !height) return;
+    const aspect = width / height;
+    if (Math.abs((Number(page.imageFrameAspect) || 0) - aspect) > 0.01) {
+      page.imageFrameAspect = aspect;
+    }
+    const image = frame.querySelector("img");
+    if (image) image.setAttribute("style", pageImageStyle(page));
+  });
+}
+
 function pagePreviewStyle(book, page) {
   return `--page-text-font:${fontStack(page.fontPreset).replace(/"/g, "&quot;")};--page-text-scale:${effectiveTextScale(book, page)};--page-text-ratio:${previewFontWidthRatio(book, page)};--page-text-points:${exportFontPointSize(book, page)};--page-image-scale:${normalizeImageScale(page.imageScale)};--page-image-offset-x:${normalizeImageOffset(page.imageOffsetX)};--page-image-offset-y:${normalizeImageOffset(page.imageOffsetY)};--page-text-justify:${textVerticalJustify(page.textVerticalAlign)};`;
 }
@@ -1973,10 +2069,26 @@ function pageImageStyle(page) {
     return `clamp(calc(100% - ${edgeLimit}%), calc(50% + ${offset}px), ${edgeLimit}%)`;
   };
   if (naturalWidth > 0 && naturalHeight > 0) {
-    const frameAspect = printSizeAspect(page.printSize);
+    const frameAspect = Number(page.imageFrameAspect) || printSizeAspect(page.printSize);
     const sourceAspect = naturalWidth / naturalHeight;
-    const widthScale = (sourceAspect > frameAspect ? sourceAspect / frameAspect : 1) * imageScale;
-    const heightScale = (sourceAspect > frameAspect ? 1 : frameAspect / sourceAspect) * imageScale;
+    const coverWidthScale = sourceAspect > frameAspect ? sourceAspect / frameAspect : 1;
+    const coverHeightScale = sourceAspect > frameAspect ? 1 : frameAspect / sourceAspect;
+    const containWidthScale = sourceAspect > frameAspect ? 1 : sourceAspect / frameAspect;
+    const containHeightScale = sourceAspect > frameAspect ? frameAspect / sourceAspect : 1;
+    let widthScale;
+    let heightScale;
+    if (imageScale >= 1) {
+      widthScale = coverWidthScale * imageScale;
+      heightScale = coverHeightScale * imageScale;
+    } else if (imageScale >= IMAGE_CONTAIN_SCALE) {
+      const blend = Math.max(0, Math.min(1, (imageScale - IMAGE_CONTAIN_SCALE) / (1 - IMAGE_CONTAIN_SCALE)));
+      widthScale = containWidthScale + (coverWidthScale - containWidthScale) * blend;
+      heightScale = containHeightScale + (coverHeightScale - containHeightScale) * blend;
+    } else {
+      const shrink = Math.max(0.1, imageScale / IMAGE_CONTAIN_SCALE);
+      widthScale = containWidthScale * shrink;
+      heightScale = containHeightScale * shrink;
+    }
     const left = centerForAxis(imageOffsetX, widthScale);
     const top = centerForAxis(imageOffsetY, heightScale);
     if (sourceAspect > frameAspect) {
@@ -1989,7 +2101,7 @@ function pageImageStyle(page) {
 }
 
 function imageMinimumScale(page) {
-  return DEFAULT_IMAGE_SCALE;
+  return IMAGE_MIN_PAN_SCALE;
 }
 
 function renderPageImageMarkup(page, isGeneratingPage) {
@@ -2003,7 +2115,7 @@ function renderPageImageMarkup(page, isGeneratingPage) {
             <div class="page-art-empty-state"><span class="page-art-empty-state-label">Generating page ${page.number} illustration...</span></div>
           `
           : page.imageUrl
-          ? `<div class="page-art-frame"><img src="${escapeHtml(page.imageUrl)}" alt="Preview for page ${page.number}" style="${imageStyle}" /></div>`
+          ? `<div class="page-art-frame" data-page-id="${escapeHtml(page.id)}"><img src="${escapeHtml(page.imageUrl)}" alt="Preview for page ${page.number}" style="${imageStyle}" /></div>`
           : `<div class="page-art-empty-state"><span class="page-art-empty-state-label">No image yet</span></div>`
       }
     </div>`;
@@ -2165,10 +2277,10 @@ function selectedPreviewPages(book) {
   selectedPreviewPageIds = normalizeSelectedPreviewPageIds(selectedPreviewPageIds, book);
   state.selectedPreviewPageIds = [...selectedPreviewPageIds];
   let pages = selectedPreviewPageIds
-    .map((id) => book.pages.find((page) => page.id === id))
+    .map((id) => editablePageById(book, id))
     .filter(Boolean)
     .sort((a, b) => a.number - b.number);
-  if (pages.length === 2 && !areFacingPages(book, pages[0], pages[1])) {
+  if (pages.length === 2 && !pages.some((page) => isBackCoverPageId(page.id)) && !areFacingPages(book, pages[0], pages[1])) {
     pages = [pages.find((page) => page.id === book.activePageId) || pages[0]];
     selectedPreviewPageIds = pages.map((page) => page.id);
     state.selectedPreviewPageIds = [...selectedPreviewPageIds];
@@ -2178,12 +2290,15 @@ function selectedPreviewPages(book) {
 
 function normalizeSelectedPreviewPageIds(value, book) {
   const pages = Array.isArray(book?.pages) ? book.pages : [];
-  const validIds = [...new Set((Array.isArray(value) ? value : []).filter((id) => pages.some((page) => page.id === id)))].slice(0, 2);
+  const validIds = [...new Set((Array.isArray(value) ? value : []).filter((id) => pages.some((page) => page.id === id) || isBackCoverPageId(id)))].slice(0, 2);
   if (!validIds.length) {
     const fallbackId = book?.activePageId || pages[0]?.id || "";
     return fallbackId ? [fallbackId] : [];
   }
   if (validIds.length === 2) {
+    if (validIds.some((id) => isBackCoverPageId(id))) {
+      return validIds.filter((id) => isBackCoverPageId(id) || id === book?.activePageId).slice(0, 1);
+    }
     const selectedPages = validIds
       .map((id) => pages.find((page) => page.id === id))
       .filter(Boolean)
@@ -2232,7 +2347,7 @@ function renderContextualPreviewToolbar(book, pages) {
   return `
     <section class="contextual-page-toolbar" data-page-id="${escapeHtml(pageIds)}">
       <div class="contextual-page-toolbar-head">
-        <strong>${isPair ? `Pages ${targetPages[0].number} + ${targetPages[1].number}` : `Page ${sourcePage.number}`}</strong>
+        <strong>${isPair ? `Pages ${targetPages[0].number} + ${targetPages[1].number}` : isBackCoverPageId(sourcePage.id) ? "Back Cover" : `Page ${sourcePage.number}`}</strong>
         <span>${isPair ? "Two-page layouts unlocked" : "Select one more page for spread layouts"}</span>
       </div>
       <div class="contextual-toolbar-section">
@@ -2311,6 +2426,46 @@ function renderSelectedPairPreview(book, leftPage, rightPage, activeGeneratingPa
       <div class="full-book-spread-spine" aria-hidden="true"></div>
       ${renderPageTextMarkup(book, textPage, "mini-overlay-text")}
     </div>
+  `;
+}
+
+function renderBackCoverPreviewCard(book) {
+  syncBackCoverPageFields(book);
+  const page = book.backCoverPage;
+  const isFocused = page.id === book.activePageId;
+  const isSelected = selectedPreviewPageIds.includes(page.id);
+  return `
+    <article
+      class="page-slider-card back-cover-preview-card${isFocused ? " is-focused" : ""}${isSelected ? " is-selected" : ""}"
+      data-page-id="${BACK_COVER_PAGE_ID}"
+      data-back-cover-preview-card="true"
+    >
+      <div class="page-slider-card-head">
+        <div class="page-slider-card-head-row">
+          <button
+            class="page-slider-card-focus"
+            type="button"
+            data-focus-preview-page="${BACK_COVER_PAGE_ID}"
+            aria-label="Focus back cover"
+          >
+            <strong>Back Cover</strong>
+            <span>${escapeHtml(layoutLabel(page.layout))}</span>
+          </button>
+          <button
+            class="page-selection-toggle${isSelected ? " is-active" : ""}"
+            type="button"
+            data-toggle-preview-selection="${BACK_COVER_PAGE_ID}"
+            aria-pressed="${isSelected}"
+            title="${isSelected ? "Remove back cover from layout selection" : "Select back cover for layout"}"
+          >
+            ${isSelected ? "Selected" : "Select"}
+          </button>
+        </div>
+      </div>
+      <div class="page-slider-card-body">
+        ${renderFullBookPageCard(book, page, state.isGenerating ? state.generatingPageId : "")}
+      </div>
+    </article>
   `;
 }
 
@@ -2406,11 +2561,12 @@ function renderFullBookPreviewMarkup(book) {
     `;
     pageCards.push(card);
   }
+  pageCards.push(renderBackCoverPreviewCard(book));
   return `
     <div class="full-book-preview-head">
       <div class="full-book-preview-head-copy">
         <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
-        <span>${book.pages.length} pages</span>
+        <span>${book.pages.length} pages + back cover</span>
       </div>
     </div>
     ${renderContextualPreviewToolbar(book, selectedPages)}
@@ -2435,7 +2591,7 @@ function pageIdsFromControl(control, fallbackPageId = activePage().id) {
 
 function updatePageById(pageId, values) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId);
+  const page = editablePageById(book, pageId);
   if (!page) return;
   Object.assign(page, values);
   if (isOverlayLayout(page.layout)) {
@@ -2443,6 +2599,7 @@ function updatePageById(pageId, values) {
   } else {
     page.textSpace = "";
   }
+  if (isBackCoverPageId(pageId)) syncBackCoverPageFields(book);
   book.activePageId = pageId;
   touchActiveBook();
   saveState();
@@ -2455,7 +2612,7 @@ function updatePagesByIds(pageIds, valuesForPage) {
   const ids = Array.isArray(pageIds) ? pageIds : [pageIds];
   let firstUpdatedPageId = "";
   ids.forEach((pageId) => {
-    const page = book.pages.find((item) => item.id === pageId);
+    const page = editablePageById(book, pageId);
     if (!page) return;
     const values = typeof valuesForPage === "function" ? valuesForPage(page) : valuesForPage;
     Object.assign(page, values);
@@ -2464,6 +2621,7 @@ function updatePagesByIds(pageIds, valuesForPage) {
     } else {
       page.textSpace = "";
     }
+    if (isBackCoverPageId(pageId)) syncBackCoverPageFields(book);
     if (!firstUpdatedPageId) firstUpdatedPageId = pageId;
   });
   if (!firstUpdatedPageId) return;
@@ -2476,7 +2634,7 @@ function updatePagesByIds(pageIds, valuesForPage) {
 
 async function setPageImageFromFile(file, pageId = activePage().id) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const page = editablePageById(book, pageId) || activePage();
   setStatus("Preparing page image", "Resizing the uploaded image for this page.");
   const { dataUrl: imageDataUrl, width: naturalWidth, height: naturalHeight } = await resizeFileToDataUrl(file, 2400, 0.92);
   const previewUrl = imageDataUrl;
@@ -2494,15 +2652,16 @@ async function setPageImageFromFile(file, pageId = activePage().id) {
     prompt: "",
     notes: `Uploaded image: ${file.name}`,
   });
+  if (isBackCoverPageId(page.id)) syncBackCoverPageFields(book);
   touchActiveBook();
   saveState();
-  setStatus("Image attached", `The uploaded image is now saved to page ${page.number}.`);
+  setStatus("Image attached", `The uploaded image is now saved to ${isBackCoverPageId(page.id) ? "the back cover" : `page ${page.number}`}.`);
   render();
 }
 
 function clearPageImage(pageId = activePage().id) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const page = editablePageById(book, pageId) || activePage();
   revokeBlobUrl(page.imageUrl);
   Object.assign(page, {
     imageUrl: "",
@@ -2511,6 +2670,7 @@ function clearPageImage(pageId = activePage().id) {
     imageSource: "",
     notes: "",
   });
+  if (isBackCoverPageId(page.id)) syncBackCoverPageFields(book);
   touchActiveBook();
   saveState();
   setStatus("Page image cleared", "This page is back to its draft state.");
@@ -2519,7 +2679,7 @@ function clearPageImage(pageId = activePage().id) {
 
 function useGeneratedImageOnPage(imageId, pageId) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId);
+  const page = editablePageById(book, pageId);
   const image = normalizeGeneratedImageLibrary(book.imageLibrary, book.pages).find((item) => item.id === imageId);
   if (!page || !image) return;
   book.imageLibrary = normalizeGeneratedImageLibrary(book.imageLibrary, book.pages);
@@ -2536,10 +2696,11 @@ function useGeneratedImageOnPage(imageId, pageId) {
     prompt: image.prompt,
     notes: image.notes,
   });
+  if (isBackCoverPageId(page.id)) syncBackCoverPageFields(book);
   book.activePageId = page.id;
   touchActiveBook();
   saveState();
-  setStatus("Generated image selected", `Page ${page.number} now uses ${image.fileName || "the selected illustration"}.`);
+  setStatus("Generated image selected", `${isBackCoverPageId(page.id) ? "The back cover" : `Page ${page.number}`} now uses ${image.fileName || "the selected illustration"}.`);
   render();
 }
 
@@ -2600,6 +2761,22 @@ function deleteGeneratedImage(imageId, keepOpenPageId = "") {
           notes: "",
         });
       });
+      if (book.backCoverPage?.imageUrl === image.imageUrl && book.backCoverPage?.imageSource === "generated") {
+        Object.assign(book.backCoverPage, {
+          imageUrl: "",
+          imageDataUrl: "",
+          fileName: "",
+          imageSource: "",
+          imageScale: DEFAULT_IMAGE_SCALE,
+          imageOffsetX: DEFAULT_IMAGE_OFFSET,
+          imageOffsetY: DEFAULT_IMAGE_OFFSET,
+          imageNaturalWidth: 0,
+          imageNaturalHeight: 0,
+          prompt: "",
+          notes: "",
+        });
+        syncBackCoverPageFields(book);
+      }
       book.imageLibrary = nextLibrary;
       if (keepOpenPageId) {
         openGeneratedImagePickerPageIds.add(keepOpenPageId);
@@ -2651,6 +2828,7 @@ function addPage() {
 function duplicatePage() {
   const book = activeBook();
   const source = activePage();
+  if (isBackCoverPageId(source.id)) return;
   const page = {
     ...defaultPage(book.pages.length + 1, source.layout),
     text: source.text,
@@ -2682,7 +2860,9 @@ function duplicatePage() {
 function deletePage() {
   const book = activeBook();
   if (book.pages.length <= 1) return;
+  if (isBackCoverPageId(book.activePageId)) return;
   const index = book.pages.findIndex((page) => page.id === book.activePageId);
+  if (index < 0) return;
   book.pages.splice(index, 1);
   book.pages.forEach((page, pageIndex) => {
     page.number = pageIndex + 1;
@@ -2697,7 +2877,7 @@ function deletePage() {
 
 async function generatePageForId(pageId) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const page = editablePageById(book, pageId) || activePage();
   const resolvedTextSpace = promptTextSpaceForPage(page);
   if (!page.sceneDescription.trim() && !page.text.trim()) {
     setStatus("Missing page", "Add page text or illustration direction before generating.");
@@ -2711,7 +2891,7 @@ async function generatePageForId(pageId) {
   }
 
   setGenerating(true, page.id);
-  setStatus("Generating", `Creating illustration for page ${page.number}.`);
+  setStatus("Generating", `Creating illustration for ${isBackCoverPageId(page.id) ? "the back cover" : `page ${page.number}`}.`);
 
   const payload = {
     project_title: book.projectTitle,
@@ -2782,9 +2962,10 @@ async function generatePageForId(pageId) {
       prompt: libraryImage.prompt,
       notes: libraryImage.notes,
     });
+    if (isBackCoverPageId(page.id)) syncBackCoverPageFields(book);
     touchActiveBook();
     saveState();
-    setStatus("Illustration ready", `Page ${page.number} has a generated image.`);
+    setStatus("Illustration ready", `${isBackCoverPageId(page.id) ? "The back cover" : `Page ${page.number}`} has a generated image.`);
     render();
   } catch (error) {
     setStatus("Error", error.message || "Something went wrong while generating the page.");
@@ -2795,7 +2976,7 @@ async function generatePageForId(pageId) {
 
 async function updatePagePrompt(pageId = activePage().id) {
   const book = activeBook();
-  const page = book.pages.find((item) => item.id === pageId) || activePage();
+  const page = editablePageById(book, pageId) || activePage();
   const resolvedTextSpace = promptTextSpaceForPage(page);
   if (page.textSpace !== resolvedTextSpace) {
     page.textSpace = resolvedTextSpace;
@@ -3285,10 +3466,11 @@ function createStartedBook() {
   book.audience = refs.startAudienceSelect.value;
   book.suggestedPageCount = refs.startPageCount.value;
   book.manuscript = manuscript;
+  book.backCoverSummary = extractBackCoverTextFromManuscript(manuscript) || book.backCoverSummary;
   if (author) state.authors = normalizeAuthors(state.authors, author);
   const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
   book.pages = pagesFromTextBlocks(book, pageTexts);
-  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts, book.backCoverSummary);
   book.activePageId = book.pages[0]?.id || "";
   touchBook(book);
   state.books.push(book);
@@ -3322,8 +3504,9 @@ function buildPagesFromStory() {
   }
 
   const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
+  book.backCoverSummary = extractBackCoverTextFromManuscript(manuscript) || book.backCoverSummary;
   book.pages = pagesFromTextBlocks(book, pageTexts);
-  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts, book.backCoverSummary);
   book.activePageId = book.pages[0]?.id || "";
   touchActiveBook();
   saveState();
@@ -3411,11 +3594,36 @@ function syncManuscriptFromPages(book) {
   const sections = textSlotPages(book)
     .filter((page) => String(page.text || "").trim())
     .map((page) => ({ number: page.number, text: page.text || "" }));
-  book.manuscript = formatManuscriptWithPageBreaks(sections);
+  book.manuscript = formatManuscriptWithPageBreaks(sections, book.backCoverSummary);
+}
+
+function splitBackCoverSection(manuscript) {
+  const raw = String(manuscript || "").replace(/\r/g, "");
+  const match = raw.match(/^\s*---\s*Back\s+Cover\s*---\s*$/im);
+  if (!match) {
+    return { body: raw, backCoverText: "" };
+  }
+  return {
+    body: raw.slice(0, match.index).trim(),
+    backCoverText: raw.slice(match.index + match[0].length).trim(),
+  };
+}
+
+function extractBackCoverTextFromManuscript(manuscript) {
+  return splitBackCoverSection(manuscript).backCoverText;
+}
+
+function ensureBackCoverSection(manuscript, backCoverText = "") {
+  const text = String(backCoverText || "").trim();
+  if (!text) return String(manuscript || "");
+  const parts = splitBackCoverSection(manuscript);
+  if (parts.backCoverText) return String(manuscript || "");
+  const body = parts.body.trim();
+  return [body, `--- Back Cover ---\n${text}`].filter(Boolean).join("\n\n--------------------------------\n\n");
 }
 
 function extractPageTextsFromManuscript(manuscript) {
-  const lines = String(manuscript || "").split(/\r?\n/);
+  const lines = splitBackCoverSection(manuscript).body.split(/\r?\n/);
   const blocks = [];
   let current = [];
   let sawPageHeader = false;
@@ -3449,6 +3657,12 @@ function extractPageTextsFromManuscript(manuscript) {
 
 function syncPagesFromManuscript(book) {
   const pageTexts = extractPageTextsFromManuscript(book.manuscript);
+  const backCoverText = extractBackCoverTextFromManuscript(book.manuscript);
+  if (backCoverText) {
+    book.backCoverSummary = backCoverText;
+    book.backCoverPage = normalizeBackCoverPage({ ...book.backCoverPage, text: backCoverText }, book);
+    if (refs.backCoverSummary) refs.backCoverSummary.value = backCoverText;
+  }
   if (!pageTexts.length) return false;
 
   ensureTextSlotCapacity(book, pageTexts.length);
@@ -3470,7 +3684,7 @@ function syncPagesFromManuscript(book) {
 }
 
 function splitStoryIntoPages(text, audience, requestedCount) {
-  const clean = stripPageBreakMarkers(text).replace(/\s+/g, " ").trim();
+  const clean = stripPageBreakMarkers(splitBackCoverSection(text).body).replace(/\s+/g, " ").trim();
   const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) || [clean];
   const totalWords = countWords(clean);
   const autoCount = automaticPageCount(clean, audience);
@@ -3536,26 +3750,29 @@ function splitStoryIntoPages(text, audience, requestedCount) {
 }
 
 function automaticPageCount(text, audience) {
-  const clean = stripPageBreakMarkers(text).replace(/\s+/g, " ").trim();
+  const clean = stripPageBreakMarkers(splitBackCoverSection(text).body).replace(/\s+/g, " ").trim();
   if (!clean) return 1;
   return Math.max(1, Math.min(64, Math.ceil(countWords(clean) / wordsPerPage(audience))));
 }
 
 function stripPageBreakMarkers(text) {
-  return String(text || "")
+  return splitBackCoverSection(text).body
     .split(/\r?\n/)
     .filter((line) => !/^\s*(?:[-=_]{3,}\s*Page\s+\d+\s*[-=_]{3,}|[-=_]{8,})\s*$/.test(line))
     .join("\n");
 }
 
-function formatManuscriptWithPageBreaks(pageTexts) {
+function formatManuscriptWithPageBreaks(pageTexts, backCoverText = "") {
   const sections = pageTexts.map((entry, index) => {
     const isStructured = entry && typeof entry === "object";
     const number = isStructured ? entry.number || index + 1 : index + 1;
     const text = isStructured ? entry.text || "" : entry || "";
     return [`--- Page ${number} ---`, String(text).trim()].join("\n");
   });
-  return sections.join("\n\n--------------------------------\n\n");
+  const formatted = sections.join("\n\n--------------------------------\n\n");
+  const backCover = String(backCoverText || "").trim();
+  if (!backCover) return formatted;
+  return [formatted, `--- Back Cover ---\n${backCover}`].filter(Boolean).join("\n\n--------------------------------\n\n");
 }
 
 function wordsPerPage(audience) {
@@ -3720,9 +3937,15 @@ refs.printSizeToolbar.addEventListener("click", (event) => {
 });
 
 refs.backCoverSummary.addEventListener("input", (event) => {
-  activeBook().backCoverSummary = event.target.value;
+  const book = activeBook();
+  book.backCoverSummary = event.target.value;
+  book.backCoverPage = normalizeBackCoverPage({ ...book.backCoverPage, text: book.backCoverSummary }, book);
+  syncManuscriptFromPages(book);
+  refs.storyManuscript.value = book.manuscript;
   touchActiveBook();
   saveState();
+  renderPageList();
+  renderBookPreview();
 });
 
 refs.suggestedPageCount.addEventListener("input", (event) => {
@@ -3806,8 +4029,8 @@ refs.fullBookPreview.addEventListener("click", (event) => {
       return;
     }
     const wasSelected = selectedPreviewPageIds.includes(selectedPageId);
-    const selectedPage = activeBook().pages.find((page) => page.id === selectedPageId);
-    const currentPage = activeBook().pages.find((page) => page.id === selectedPreviewPageIds[0]);
+    const selectedPage = editablePageById(activeBook(), selectedPageId);
+    const currentPage = editablePageById(activeBook(), selectedPreviewPageIds[0]);
     if (wasSelected) {
       selectedPreviewPageIds = selectedPreviewPageIds.filter((id) => id !== selectedPageId);
     } else {
@@ -3909,9 +4132,7 @@ refs.fullBookPreview.addEventListener("click", (event) => {
   const applyTextStyleButton = event.target.closest("[data-apply-text-style-all]");
   if (applyTextStyleButton) {
     const book = activeBook();
-    const sourcePage = book.pages.find(
-      (page) => page.id === applyTextStyleButton.dataset.applyTextStyleAll,
-    );
+    const sourcePage = editablePageById(book, applyTextStyleButton.dataset.applyTextStyleAll);
     if (!sourcePage) return;
     const sharedTextStyle = {
       fontPreset: sourcePage.fontPreset,
@@ -3920,12 +4141,12 @@ refs.fullBookPreview.addEventListener("click", (event) => {
       textVerticalAlign: sourcePage.textVerticalAlign,
     };
     updatePagesByIds(
-      book.pages.map((page) => page.id),
+      [...book.pages.map((page) => page.id), BACK_COVER_PAGE_ID],
       sharedTextStyle,
     );
     setStatus(
       "Text style applied",
-      `${fontLabel(sourcePage.fontPreset)}, ${fontPointLabel(book, sourcePage)}, and its alignment now apply to every page.`,
+      `${fontLabel(sourcePage.fontPreset)}, ${fontPointLabel(book, sourcePage)}, and its alignment now apply to every page and the back cover.`,
     );
     render();
     return;
@@ -4025,11 +4246,15 @@ refs.fullBookPreview.addEventListener("input", (event) => {
   const editor = event.target.closest("[data-inline-page-text-editor]");
   if (!editor) return;
   const pageId = editor.dataset.pageId;
-  const page = activeBook().pages.find((item) => item.id === pageId);
+  const page = editablePageById(activeBook(), pageId);
   if (!page) return;
   const nextText = normalizeInlinePageText(editor.innerText);
   if (page.text === nextText) return;
   page.text = nextText;
+  if (isBackCoverPageId(pageId)) {
+    syncBackCoverPageFields(activeBook());
+    refs.backCoverSummary.value = activeBook().backCoverSummary;
+  }
   syncManuscriptFromPages(activeBook());
   touchActiveBook();
   saveState();
@@ -4041,11 +4266,15 @@ refs.fullBookPreview.addEventListener("focusout", (event) => {
   const editor = event.target.closest("[data-inline-page-text-editor]");
   if (!editor) return;
   const pageId = editor.dataset.pageId;
-  const page = activeBook().pages.find((item) => item.id === pageId);
+  const page = editablePageById(activeBook(), pageId);
   if (!page) return;
   const nextText = normalizeInlinePageText(editor.innerText);
   if (page.text !== nextText) {
     page.text = nextText;
+    if (isBackCoverPageId(pageId)) {
+      syncBackCoverPageFields(activeBook());
+      refs.backCoverSummary.value = activeBook().backCoverSummary;
+    }
     syncManuscriptFromPages(activeBook());
     touchActiveBook();
     saveState();
@@ -4056,6 +4285,20 @@ refs.fullBookPreview.addEventListener("focusout", (event) => {
 });
 
 refs.pageList.addEventListener("click", (event) => {
+  const backCoverButton = event.target.closest("[data-back-cover-list-item]");
+  if (backCoverButton) {
+    activeBook().activePageId = BACK_COVER_PAGE_ID;
+    selectedPreviewPageIds = [BACK_COVER_PAGE_ID];
+    saveState();
+    render();
+    refs.fullBookPreview.querySelector("[data-back-cover-preview-card]")?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+    setStatus("Back cover selected", "Use the normal page controls to adjust the back cover.");
+    return;
+  }
   const button = event.target.closest("[data-page-id]");
   if (!button) return;
   activeBook().activePageId = button.dataset.pageId;

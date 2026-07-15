@@ -956,6 +956,16 @@ def load_pdf_font(font_key: str, size: int) -> ImageFont.FreeTypeFont | ImageFon
     return ImageFont.load_default()
 
 
+def load_pdf_emoji_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    windows = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for path in [windows / "seguiemj.ttf", windows / "seguisym.ttf", windows / "segoeui.ttf"]:
+        try:
+            return ImageFont.truetype(str(path), size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
 def normalize_layout_mode(layout: str) -> str:
     normalized = str(layout or "").strip()
     if normalized.startswith("overlay") or normalized.startswith("single-overlay"):
@@ -1012,8 +1022,8 @@ def text_block_metrics(draw: ImageDraw.ImageDraw, lines: list[str], font, line_s
     line_heights = []
     max_width = 0
     for line in lines:
+        width = pdf_text_line_width(draw, line or " ", font)
         bbox = draw.textbbox((0, 0), line or " ", font=font)
-        width = bbox[2] - bbox[0]
         height = bbox[3] - bbox[1]
         max_width = max(max_width, width)
         line_heights.append(height)
@@ -1048,6 +1058,38 @@ def fit_text_font(
         best_font, best_lines, best_spacing, best_height = font, lines, spacing, total_height
         size -= 2
     return best_font, best_lines, best_spacing, best_height
+
+
+PDF_EMOJI_FALLBACK_CHARS = {"🐾"}
+
+
+def pdf_text_line_width(draw: ImageDraw.ImageDraw, line: str, font) -> int:
+    total = 0
+    emoji_font = load_pdf_emoji_font(max(12, int(getattr(font, "size", 42))))
+    for char in str(line or ""):
+        char_font = emoji_font if char in PDF_EMOJI_FALLBACK_CHARS else font
+        bbox = draw.textbbox((0, 0), char or " ", font=char_font)
+        total += bbox[2] - bbox[0]
+    return total
+
+
+def draw_pdf_text_line(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    line: str,
+    *,
+    font,
+    fill: tuple[int, int, int, int],
+    emoji_fill: tuple[int, int, int, int] = (198, 86, 39, 255),
+) -> None:
+    x, y = position
+    emoji_font = load_pdf_emoji_font(max(12, int(getattr(font, "size", 42))))
+    for char in str(line or ""):
+        char_font = emoji_font if char in PDF_EMOJI_FALLBACK_CHARS else font
+        char_fill = emoji_fill if char in PDF_EMOJI_FALLBACK_CHARS else fill
+        draw.text((x, y), char, font=char_font, fill=char_fill)
+        bbox = draw.textbbox((0, 0), char or " ", font=char_font)
+        x += bbox[2] - bbox[0]
 
 
 def paste_fitted_image(
@@ -1207,14 +1249,14 @@ def draw_centered_text_block(
     y = top + max(0, int(((bottom - top) - block_height) / 2))
     for line in lines:
         bbox = draw.textbbox((0, 0), line or " ", font=font)
-        line_width = bbox[2] - bbox[0]
+        line_width = pdf_text_line_width(draw, line or " ", font)
         if align == "left":
             x = left
         elif align == "right":
             x = right - line_width
         else:
             x = left + int(((right - left) - line_width) / 2)
-        draw.text((x, y), line, font=font, fill=fill)
+        draw_pdf_text_line(draw, (x, y), line, font=font, fill=fill)
         y += (bbox[3] - bbox[1]) + spacing
     return total_height
 
@@ -1256,14 +1298,14 @@ def draw_page_text_region(
         y = max(padding_y, text_region.height - text_height - padding_y)
     for line in lines:
         bbox = draw.textbbox((0, 0), line or " ", font=font)
-        line_width = bbox[2] - bbox[0]
+        line_width = pdf_text_line_width(draw, line or " ", font)
         if horizontal == "left":
             x = padding_x
         elif horizontal == "right":
             x = max(padding_x, text_region.width - padding_x - line_width)
         else:
             x = max(padding_x, int((text_region.width - line_width) / 2))
-        draw.text((x, y), line, font=font, fill=fill)
+        draw_pdf_text_line(draw, (x, y), line, font=font, fill=fill)
         y += (bbox[3] - bbox[1]) + spacing
 
 
@@ -1342,6 +1384,22 @@ def render_copyright_page(book: dict[str, Any]) -> Image.Image:
 
 
 def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
+    width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
+    page_w = int(width)
+    page_h = int(height)
+    background = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
+    cover_reference = str(book.get("coverReferenceUrl") or book.get("coverPreviewUrl") or "").strip()
+    cover_image = open_image_reference(cover_reference)
+    if cover_image is not None:
+        paste_fitted_image(
+            background,
+            cover_image,
+            (0, 0, page_w, page_h),
+            scale=1.0,
+            offset_x=0.0,
+            offset_y=0.0,
+            fill=(248, 236, 220, 255),
+        )
     back_cover_page = book.get("backCoverPage", {}) if isinstance(book.get("backCoverPage", {}), dict) else {}
     page = {
         "id": "__back_cover__",
@@ -1360,7 +1418,62 @@ def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
         "imageDataUrl": str(back_cover_page.get("imageDataUrl") or "").strip(),
         "fileName": str(back_cover_page.get("fileName") or book.get("backCoverImageFileName") or "").strip(),
     }
-    return render_pdf_text_page(book, page)
+
+    panel_w = max(420, int(page_w * 0.72))
+    panel_h = max(260, int(page_h * 0.44))
+    panel_x = int((page_w - panel_w) / 2)
+    panel_y = int((page_h - panel_h) / 2)
+    panel = Image.new("RGBA", (panel_w, panel_h), (0, 0, 0, 0))
+    panel_draw = ImageDraw.Draw(panel)
+    panel_draw.rounded_rectangle(
+        (0, 0, panel_w - 1, panel_h - 1),
+        radius=24,
+        fill=(255, 252, 248, 218),
+        outline=(233, 211, 192, 235),
+        width=2,
+    )
+
+    photo = open_image_reference(str(page.get("imageDataUrl") or page.get("imageUrl") or ""))
+    text_top = max(24, int(panel_h * 0.36))
+    if photo is not None:
+        source = photo.convert("RGBA")
+        max_photo_w = int(panel_w * 0.34)
+        max_photo_h = int(panel_h * 0.34)
+        scale = min(max_photo_w / max(1, source.width), max_photo_h / max(1, source.height))
+        render_w = max(1, int(source.width * scale))
+        render_h = max(1, int(source.height * scale))
+        faded = source.resize((render_w, render_h), PIL_LANCZOS)
+        alpha = faded.getchannel("A").point(lambda value: int(value * 0.62))
+        faded.putalpha(alpha)
+        photo_x = int((panel_w - render_w) / 2)
+        photo_y = int(panel_h * 0.10)
+        panel.alpha_composite(faded, (photo_x, photo_y))
+        photo_draw = ImageDraw.Draw(panel)
+        photo_draw.rounded_rectangle(
+            (photo_x, photo_y, photo_x + render_w, photo_y + render_h),
+            radius=10,
+            outline=(214, 177, 144, 170),
+            width=2,
+        )
+        text_top = photo_y + render_h + max(18, int(panel_h * 0.06))
+
+    text_box = (
+        max(24, int(panel_w * 0.07)),
+        text_top,
+        panel_w - max(24, int(panel_w * 0.07)),
+        panel_h - max(22, int(panel_h * 0.2)),
+    )
+    draw_centered_text_block(
+        panel,
+        str(page.get("text") or "").strip(),
+        text_box,
+        font_key=str(page.get("fontPreset") or "storybook-serif"),
+        start_size=max(34, int(min(panel_w, panel_h) * 0.085)),
+        min_size=22,
+        fill=(58, 42, 31, 255),
+    )
+    background.alpha_composite(panel, (panel_x, panel_y))
+    return background.convert("RGB")
 
 
 def linked_pair_key(first_page_id: str, second_page_id: str) -> str:
@@ -1450,13 +1563,13 @@ def render_linked_spread_pdf_page(book: dict[str, Any], page: dict[str, Any], ro
     return render_pdf_page(book, page)
 
 
-def render_pdf_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Image:
+def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canvas: Image.Image | None = None) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
     page_h = int(height)
     preview_width, preview_height = size_for_print_size(str(page.get("printSize", "")).strip()).split("x")
     preview_aspect = int(preview_width) / max(1, int(preview_height))
-    canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
+    canvas = background_canvas.copy().convert("RGBA") if background_canvas is not None else Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
     draw = ImageDraw.Draw(canvas)
 
     layout = str(page.get("layout", "")).strip()

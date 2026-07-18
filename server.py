@@ -939,8 +939,8 @@ def font_candidates(font_key: str) -> list[str]:
             windows / "comic.ttf",
         ],
         "storybook-serif": [
-            windows / "times.ttf",
             windows / "georgia.ttf",
+            windows / "times.ttf",
             windows / "timesnewroman.ttf",
         ],
     }
@@ -1009,7 +1009,11 @@ def render_wrapped_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: 
         current = words[0]
         for word in words[1:]:
             candidate = f"{current} {word}"
-            if draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
+            # Measure with the same per-character path used by
+            # draw_pdf_text_line. Measuring the whole string here applies
+            # kerning that the renderer does not, which makes published lines
+            # wrap later than the browser preview.
+            if pdf_text_line_width(draw, candidate, font) <= max_width:
                 current = candidate
                 continue
             lines.append(current)
@@ -1279,7 +1283,11 @@ def draw_page_text_region(
     if not cleaned_text:
         return
     draw = ImageDraw.Draw(text_region)
-    start_size = min(200, max(22, int(base_size * float(font_scale or 1))))
+    # Pillow's point-size rendering appears larger than the same Georgia CSS
+    # size in the responsive Studio preview. Calibrate the rasterized PDF type
+    # so its apparent size and wrapping match the browser.
+    pdf_font_metric_scale = 0.85
+    start_size = min(200, max(22, int(base_size * float(font_scale or 1) * pdf_font_metric_scale)))
     font, lines, spacing, total_height = fit_text_font(
         draw,
         cleaned_text,
@@ -1689,6 +1697,8 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
         draw_placeholder(canvas, image_box)
 
     text_region = Image.new("RGBA", (text_box[2] - text_box[0], text_box[3] - text_box[1]), (0, 0, 0, 0))
+    text_region_padding_x = max(18, int(text_region.width * 0.043))
+    text_region_padding_y = max(14, int(text_region.height * 0.08))
     draw_page_text_region(
         text_region,
         text,
@@ -1698,8 +1708,10 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
         horizontal_align=text_horizontal_align,
         vertical_align=text_vertical_align,
         base_size=52 if book.get("audience") in {"3-5", "3-8"} else 40,
-        padding_x=18,
-        padding_y=14,
+        # Match the proportional 16px/14px inset used by the Story Studio
+        # preview instead of treating those CSS pixels as 300-DPI pixels.
+        padding_x=text_region_padding_x,
+        padding_y=text_region_padding_y,
     )
     canvas.alpha_composite(text_region, (text_box[0], text_box[1]))
     return canvas.convert("RGB")

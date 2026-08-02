@@ -36,6 +36,7 @@ IMAGE_QUALITY = "medium"
 CHARACTER_IMAGE_QUALITY = "low"
 CHARACTER_AVATAR_SIZE = "1024x1024"
 DEFAULT_TEXT_SPACE = "Leave a calm open area for real page text"
+PUBLISH_VERTICAL_INSET_PX = 10
 DEV_SERVER_VERSION = uuid.uuid4().hex
 try:
     PIL_LANCZOS = Image.Resampling.LANCZOS
@@ -697,6 +698,7 @@ def generation_size_for_print_size(print_size: str) -> str:
 def layout_title(layout: str) -> str:
     normalized = str(layout).strip()
     titles = {
+        "single-text-only": "Single page: text only",
         "stacked-image-top": "Image top, text bottom",
         "stacked-text-top": "Text top, image bottom",
         "single-overlay-top": "Single page: text over image, top",
@@ -716,6 +718,7 @@ def layout_title(layout: str) -> str:
 def layout_guidance(layout: str) -> str:
     normalized = str(layout).strip()
     guidance = {
+        "single-text-only": "Do not create an illustration for this text-only page.",
         "stacked-image-top": "Compose the illustration with the main art above and a calm text-safe area below.",
         "stacked-text-top": "Compose the illustration with a quiet text-safe area above and the main art below.",
         "single-overlay-top": "Compose one page as a full-bleed image with a calm, readable text-safe area at the top.",
@@ -735,6 +738,7 @@ def layout_guidance(layout: str) -> str:
 def layout_padding_guidance(layout: str) -> str:
     normalized = str(layout).strip()
     guidance = {
+        "single-text-only": "No illustration is used on this page.",
         "stacked-image-top": "Keep the main art high in the frame and leave generous quiet space beneath it, with extra breathing room around every edge in case the page crop shifts later.",
         "stacked-text-top": "Keep the main art low in the frame and leave generous quiet space above it, with extra breathing room around every edge in case the page crop shifts later.",
         "single-overlay-top": "Keep the focal art within this single page and leave uncluttered breathing room at the top for a readable text panel.",
@@ -904,6 +908,7 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
                     "imageScale": page.get("imageScale", 1),
                     "imageOffsetX": page.get("imageOffsetX", 0),
                     "imageOffsetY": page.get("imageOffsetY", 0),
+                    "imageFrameAspect": page.get("imageFrameAspect", 0),
                     "imageUrl": str(page.get("imageUrl", "")).strip(),
                     "imageDataUrl": str(page.get("imageDataUrl", "")).strip(),
                     "fileName": str(page.get("fileName", "")).strip(),
@@ -922,6 +927,11 @@ def normalize_pdf_book_state(payload: dict[str, Any]) -> dict[str, Any]:
         "backCoverPage": book.get("backCoverPage", {}) if isinstance(book.get("backCoverPage", {}), dict) else {},
         "coverPreviewUrl": str(book.get("coverPreviewUrl", "")).strip(),
         "coverReferenceUrl": str(book.get("coverReferenceUrl", "")).strip(),
+        "includeFrontCoverInPdf": book.get("includeFrontCoverInPdf") is True,
+        "backCoverFileName": str(book.get("backCoverFileName", "")).strip(),
+        "backCoverPreviewUrl": str(book.get("backCoverPreviewUrl", "")).strip(),
+        "backCoverReferenceUrl": str(book.get("backCoverReferenceUrl", "")).strip(),
+        "includeBackCoverInPdf": book.get("includeBackCoverInPdf") is True,
         "linkedPagePairs": book.get("linkedPagePairs", []) if isinstance(book.get("linkedPagePairs", []), list) else [],
         "pages": normalized_pages,
     }
@@ -968,6 +978,10 @@ def load_pdf_emoji_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFo
 
 def normalize_layout_mode(layout: str) -> str:
     normalized = str(layout or "").strip()
+    if normalized == "single-image-only":
+        return "image-only"
+    if normalized == "single-text-only":
+        return "text-only"
     if normalized.startswith("overlay") or normalized.startswith("single-overlay"):
         return "overlay"
     if normalized.startswith("spread"):
@@ -1022,13 +1036,21 @@ def render_wrapped_lines(draw: ImageDraw.ImageDraw, text: str, font, max_width: 
     return lines or [""]
 
 
+def pdf_text_line_height(draw: ImageDraw.ImageDraw, line: str, font) -> int:
+    # A CSS pre-wrap editor gives an empty paragraph the same line box as a
+    # visible line. Pillow reports a space as zero pixels high, which used to
+    # collapse blank paragraph separators in published PDFs.
+    measured_text = line if str(line or "").strip() else "Ag"
+    bbox = draw.textbbox((0, 0), measured_text, font=font)
+    return bbox[3] - bbox[1]
+
+
 def text_block_metrics(draw: ImageDraw.ImageDraw, lines: list[str], font, line_spacing: int) -> tuple[int, int]:
     line_heights = []
     max_width = 0
     for line in lines:
         width = pdf_text_line_width(draw, line or " ", font)
-        bbox = draw.textbbox((0, 0), line or " ", font=font)
-        height = bbox[3] - bbox[1]
+        height = pdf_text_line_height(draw, line, font)
         max_width = max(max_width, width)
         line_heights.append(height)
     if not line_heights:
@@ -1252,7 +1274,6 @@ def draw_centered_text_block(
     _, block_height = text_block_metrics(draw, lines, font, spacing)
     y = top + max(0, int(((bottom - top) - block_height) / 2))
     for line in lines:
-        bbox = draw.textbbox((0, 0), line or " ", font=font)
         line_width = pdf_text_line_width(draw, line or " ", font)
         if align == "left":
             x = left
@@ -1261,7 +1282,7 @@ def draw_centered_text_block(
         else:
             x = left + int(((right - left) - line_width) / 2)
         draw_pdf_text_line(draw, (x, y), line, font=font, fill=fill)
-        y += (bbox[3] - bbox[1]) + spacing
+        y += pdf_text_line_height(draw, line, font) + spacing
     return total_height
 
 
@@ -1305,7 +1326,6 @@ def draw_page_text_region(
     elif vertical == "bottom":
         y = max(padding_y, text_region.height - text_height - padding_y)
     for line in lines:
-        bbox = draw.textbbox((0, 0), line or " ", font=font)
         line_width = pdf_text_line_width(draw, line or " ", font)
         if horizontal == "left":
             x = padding_x
@@ -1314,7 +1334,7 @@ def draw_page_text_region(
         else:
             x = max(padding_x, int((text_region.width - line_width) / 2))
         draw_pdf_text_line(draw, (x, y), line, font=font, fill=fill)
-        y += (bbox[3] - bbox[1]) + spacing
+        y += pdf_text_line_height(draw, line, font) + spacing
 
 
 def render_cover_page(book: dict[str, Any]) -> Image.Image:
@@ -1326,7 +1346,13 @@ def render_cover_page(book: dict[str, Any]) -> Image.Image:
     cover_image = open_image_reference(cover_reference)
 
     if cover_image is not None:
-        paste_fitted_image(canvas, cover_image, (0, 0, page_w, page_h), scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
+        cover_box = (
+            0,
+            PUBLISH_VERTICAL_INSET_PX,
+            page_w,
+            page_h - PUBLISH_VERTICAL_INSET_PX,
+        )
+        paste_fitted_image(canvas, cover_image, cover_box, scale=1.0, offset_x=0.0, offset_y=0.0, fill=(248, 236, 220, 255))
         return canvas.convert("RGB")
     else:
         draw = ImageDraw.Draw(canvas)
@@ -1356,6 +1382,15 @@ def render_cover_page(book: dict[str, Any]) -> Image.Image:
     return canvas.convert("RGB")
 
 
+def render_uploaded_back_cover_page(book: dict[str, Any]) -> Image.Image:
+    back_cover_book = {
+        **book,
+        "coverPreviewUrl": book.get("backCoverPreviewUrl", ""),
+        "coverReferenceUrl": book.get("backCoverReferenceUrl", ""),
+    }
+    return render_cover_page(back_cover_book)
+
+
 def render_copyright_page(book: dict[str, Any]) -> Image.Image:
     width, height = size_for_print_size(str(book.get("printSize", "")).strip()).split("x")
     page_w = int(width)
@@ -1363,7 +1398,7 @@ def render_copyright_page(book: dict[str, Any]) -> Image.Image:
     canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
     draw = ImageDraw.Draw(canvas)
     margin_x = max(50, int(page_w * 0.12))
-    margin_y = max(48, int(page_h * 0.12))
+    margin_y = max(48, int(page_h * 0.12)) + PUBLISH_VERTICAL_INSET_PX
     draw.rounded_rectangle(
         (margin_x, margin_y, page_w - margin_x, page_h - margin_y),
         radius=22,
@@ -1383,7 +1418,7 @@ def render_copyright_page(book: dict[str, Any]) -> Image.Image:
             f"Copyright {copyright_year} {author or 'Unknown Author'}",
             "All rights reserved.",
             "",
-            "This book was created with Whoka Story Studio.",
+            "This book was created with WHOKA Story Studio.",
         ]
     )
     box = (margin_x + 28, margin_y + 26, page_w - margin_x - 28, page_h - margin_y - 26)
@@ -1399,10 +1434,16 @@ def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
     cover_reference = str(book.get("coverReferenceUrl") or book.get("coverPreviewUrl") or "").strip()
     cover_image = open_image_reference(cover_reference)
     if cover_image is not None:
+        cover_box = (
+            0,
+            PUBLISH_VERTICAL_INSET_PX,
+            page_w,
+            page_h - PUBLISH_VERTICAL_INSET_PX,
+        )
         paste_fitted_image(
             background,
             cover_image,
-            (0, 0, page_w, page_h),
+            cover_box,
             scale=1.0,
             offset_x=0.0,
             offset_y=0.0,
@@ -1413,7 +1454,7 @@ def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
         "id": "__back_cover__",
         "number": len(book.get("pages", [])) + 1 if isinstance(book.get("pages", []), list) else 1,
         "text": str(back_cover_page.get("text") or book.get("backCoverSummary") or "").strip()
-        or "A warm picture-book story brought to life in Whoka Story Studio.",
+        or "A warm picture-book story brought to life in WHOKA Story Studio.",
         "layout": str(back_cover_page.get("layout") or "stacked-image-top").strip(),
         "fontPreset": str(back_cover_page.get("fontPreset") or "storybook-serif").strip(),
         "fontScale": back_cover_page.get("fontScale", 1),
@@ -1479,13 +1520,14 @@ def render_back_cover_page(book: dict[str, Any]) -> Image.Image:
         start_size=max(34, int(min(panel_w, panel_h) * 0.085)),
         min_size=22,
         fill=(58, 42, 31, 255),
+        align=str(page.get("textHorizontalAlign") or "center").strip(),
     )
     background.alpha_composite(panel, (panel_x, panel_y))
     return background.convert("RGB")
 
 
 def linked_pair_key(first_page_id: str, second_page_id: str) -> str:
-    return ",".join(sorted([str(first_page_id or "").strip(), str(second_page_id or "").strip()]))
+    return ",".join([str(first_page_id or "").strip(), str(second_page_id or "").strip()])
 
 
 def has_linked_page_pair(book: dict[str, Any], first_page: dict[str, Any], second_page: dict[str, Any]) -> bool:
@@ -1520,7 +1562,7 @@ def render_pdf_text_page(book: dict[str, Any], page: dict[str, Any]) -> Image.Im
     canvas = Image.new("RGBA", (page_w, page_h), (252, 247, 240, 255))
     draw = ImageDraw.Draw(canvas)
     margin_x = max(70, int(page_w * 0.12))
-    margin_y = max(64, int(page_h * 0.12))
+    margin_y = max(64, int(page_h * 0.12)) + PUBLISH_VERTICAL_INSET_PX
     text_box = (margin_x, margin_y, page_w - margin_x, page_h - margin_y)
     draw.rounded_rectangle(text_box, radius=22, fill=(255, 252, 248, 255), outline=(231, 215, 200, 255), width=1)
 
@@ -1549,17 +1591,19 @@ def render_pdf_image_page(book: dict[str, Any], page: dict[str, Any]) -> Image.I
     page_h = int(height)
     canvas = Image.new("RGBA", (page_w, page_h), (250, 244, 236, 255))
     image = open_image_reference(str(page.get("imageDataUrl") or page.get("imageUrl") or ""))
+    vertical_inset = min(PUBLISH_VERTICAL_INSET_PX, max(0, (page_h - 1) // 2))
+    image_box = (0, vertical_inset, page_w, page_h - vertical_inset)
     paste_fitted_image(
         canvas,
         image,
-        (0, 0, page_w, page_h),
+        image_box,
         scale=float(page.get("imageScale", 1) or 1),
         offset_x=float(page.get("imageOffsetX", 0) or 0),
         offset_y=float(page.get("imageOffsetY", 0) or 0),
         fill=(250, 244, 236, 255),
     )
     if image is None:
-        draw_placeholder(canvas, (0, 0, page_w, page_h))
+        draw_placeholder(canvas, image_box)
     return canvas.convert("RGB")
 
 
@@ -1582,6 +1626,10 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
 
     layout = str(page.get("layout", "")).strip()
     layout_mode = normalize_layout_mode(layout)
+    if layout_mode == "image-only":
+        return render_pdf_image_page(book, page)
+    if layout_mode == "text-only":
+        return render_pdf_text_page(book, page)
     text = str(page.get("text", "")).strip()
     font_key = str(page.get("fontPreset", "")).strip() or "storybook-serif"
     font_scale = float(page.get("fontScale", 1) or 1)
@@ -1590,7 +1638,7 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
     image = open_image_reference(str(page.get("imageDataUrl") or page.get("imageUrl") or ""))
 
     outer_margin_x = max(48, int(page_w * 0.06))
-    outer_margin_y = max(40, int(page_h * 0.05))
+    outer_margin_y = max(40, int(page_h * 0.05)) + PUBLISH_VERTICAL_INSET_PX
     gap = max(18, int(min(page_w, page_h) * 0.03))
     paper_fill = (255, 252, 248, 255)
     image_fill = (250, 244, 236, 255)
@@ -1636,9 +1684,15 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
         return canvas.convert("RGB")
 
     if layout_mode == "overlay":
-        paste_fitted_image(canvas, image, (0, 0, page_w, page_h), scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fill=image_fill)
+        image_box = (
+            0,
+            PUBLISH_VERTICAL_INSET_PX,
+            page_w,
+            page_h - PUBLISH_VERTICAL_INSET_PX,
+        )
+        paste_fitted_image(canvas, image, image_box, scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fill=image_fill)
         if image is None:
-            draw_placeholder(canvas, (0, 0, page_w, page_h))
+            draw_placeholder(canvas, image_box)
         overlay_layout = {
             "single-overlay-top": "overlay-top",
             "single-overlay-bottom": "overlay-bottom",
@@ -1684,15 +1738,35 @@ def render_pdf_page(book: dict[str, Any], page: dict[str, Any], background_canva
         canvas.alpha_composite(overlay, (overlay_x, overlay_y))
         return canvas.convert("RGB")
 
-    if layout == "stacked-text-top":
-        text_box = (outer_margin_x, outer_margin_y, page_w - outer_margin_x, int(page_h * 0.40))
-        image_box = (outer_margin_x, int(page_h * 0.38), page_w - outer_margin_x, page_h - outer_margin_y)
+    content_left = outer_margin_x
+    content_right = page_w - outer_margin_x
+    content_width = content_right - content_left
+    content_top = outer_margin_y
+    content_bottom = page_h - outer_margin_y
+    frame_aspect = float(page.get("imageFrameAspect", 0) or 0)
+    if frame_aspect > 0:
+        # Story Studio's stacked preview sizes the text to its content and gives
+        # the remaining row to the image. The measured image-frame aspect is
+        # saved with the page, so use it here instead of the legacy fixed split.
+        available_height = content_bottom - content_top - gap
+        minimum_text_height = max(220, int(page_h * 0.12))
+        image_height = int(content_width / frame_aspect)
+        image_height = max(1, min(image_height, available_height - minimum_text_height))
+        if layout == "stacked-text-top":
+            image_box = (content_left, content_bottom - image_height, content_right, content_bottom)
+            text_box = (content_left, content_top, content_right, image_box[1] - gap)
+        else:
+            image_box = (content_left, content_top, content_right, content_top + image_height)
+            text_box = (content_left, image_box[3] + gap, content_right, content_bottom)
+    elif layout == "stacked-text-top":
+        text_box = (content_left, content_top, content_right, int(page_h * 0.40))
+        image_box = (content_left, int(page_h * 0.38), content_right, content_bottom)
     else:
-        image_box = (outer_margin_x, outer_margin_y, page_w - outer_margin_x, int(page_h * 0.62))
-        text_box = (outer_margin_x, int(page_h * 0.64), page_w - outer_margin_x, page_h - outer_margin_y)
+        image_box = (content_left, content_top, content_right, int(page_h * 0.62))
+        text_box = (content_left, int(page_h * 0.64), content_right, content_bottom)
 
     draw.rounded_rectangle(text_box, radius=18, fill=paper_fill, outline=(231, 215, 200, 255), width=1)
-    paste_fitted_image(canvas, image, image_box, scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fill=image_fill)
+    paste_fitted_image(canvas, image, image_box, scale=float(page.get("imageScale", 1) or 1), offset_x=float(page.get("imageOffsetX", 0) or 0), offset_y=float(page.get("imageOffsetY", 0) or 0), fit_aspect=frame_aspect or None, fill=image_fill)
     if image is None:
         draw_placeholder(canvas, image_box)
 
@@ -1741,21 +1815,26 @@ def publish_book_pdf(payload: dict[str, Any]) -> dict[str, Any]:
     book = normalize_pdf_book_state(payload)
     if not book:
         raise ValueError("Missing book payload.")
-    if not str(book.get("backCoverPhotoUrl", "")).strip():
-        book["backCoverPhotoUrl"] = saved_back_cover_photo_url(str(book.get("id", "")).strip())
     pages = book.get("pages", [])
     if not pages:
         raise ValueError("No pages available to publish.")
 
     BOOK_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     title = str(book.get("projectTitle", "")).strip() or "book"
-    timestamp = secrets.token_hex(4)
-    file_name = f"{slugify(title) or 'book'}-{timestamp}.pdf"
+    requested_file_name = Path(str(payload.get("file_name") or "").strip()).name
+    requested_stem = Path(requested_file_name).stem if requested_file_name else ""
+    file_stem = slugify(requested_stem) if requested_stem else f"{slugify(title) or 'book'}-{secrets.token_hex(4)}"
+    file_name = f"{file_stem or 'book'}.pdf"
     file_path = BOOK_OUTPUT_DIR / file_name
+    duplicate_number = 2
+    while file_path.exists():
+        file_name = f"{file_stem or 'book'}-{duplicate_number}.pdf"
+        file_path = BOOK_OUTPUT_DIR / file_name
+        duplicate_number += 1
 
     rendered_pages: list[Image.Image] = []
-    rendered_pages.append(render_cover_page(book))
-    rendered_pages.append(render_copyright_page(book))
+    if book.get("includeFrontCoverInPdf") and (book.get("coverPreviewUrl") or book.get("coverReferenceUrl")):
+        rendered_pages.append(render_cover_page(book))
     page_index = 0
     while page_index < len(pages):
         page = pages[page_index]
@@ -1772,8 +1851,8 @@ def publish_book_pdf(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         rendered_pages.append(render_pdf_page(book, page))
         page_index += 1
-    rendered_pages.append(render_back_cover_page(book))
-
+    if book.get("includeBackCoverInPdf") and (book.get("backCoverPreviewUrl") or book.get("backCoverReferenceUrl")):
+        rendered_pages.append(render_uploaded_back_cover_page(book))
     first, *rest = rendered_pages
     first.save(file_path, save_all=True, append_images=rest, format="PDF", resolution=300.0)
     return {

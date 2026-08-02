@@ -22,6 +22,8 @@ const PRINT_SIZES = {
   "square-10x10": { label: "Square picture book 10 x 10 in", width: 3000, height: 3000, aspect: 1 },
 };
 const PAGE_LAYOUT_OPTIONS = [
+  "single-image-only",
+  "single-text-only",
   "stacked-image-top",
   "stacked-text-top",
   "single-overlay-top",
@@ -35,6 +37,8 @@ const PAGE_LAYOUT_OPTIONS = [
   "overlay-bottom",
 ];
 const SINGLE_PAGE_LAYOUT_OPTIONS = [
+  "single-image-only",
+  "single-text-only",
   "stacked-image-top",
   "stacked-text-top",
   "single-overlay-top",
@@ -87,6 +91,8 @@ const refs = {
   globalStatusText: $("#globalStatusText"),
   publishBookButton: $("#publishBookButton"),
   addPageButton: $("#addPageButton"),
+  addPageBeforeButton: $("#addPageBeforeButton"),
+  addPageAfterButton: $("#addPageAfterButton"),
   duplicatePageButton: $("#duplicatePageButton"),
   deletePageButton: $("#deletePageButton"),
   projectTitle: $("#projectTitle"),
@@ -95,15 +101,16 @@ const refs = {
   addAuthorButton: $("#addAuthorButton"),
   printSizeSelect: $("#printSizeSelect"),
   printSizeToolbar: $("#printSizeToolbar"),
-  backCoverSummary: $("#backCoverSummary"),
+  bookStateName: $("#bookStateName"),
+  saveBookStateButton: $("#saveBookStateButton"),
+  bookStateSelect: $("#bookStateSelect"),
+  restoreBookStateButton: $("#restoreBookStateButton"),
+  deleteBookStateButton: $("#deleteBookStateButton"),
   audienceSelect: $("#audienceSelect"),
   suggestedPageCount: $("#suggestedPageCount"),
   pageCountLabel: $("#pageCountLabel"),
   storyManuscript: $("#storyManuscript"),
   buildPagesButton: $("#buildPagesButton"),
-  coverInput: $("#coverInput"),
-  clearCoverButton: $("#clearCoverButton"),
-  coverPreview: $("#coverPreview"),
   pageList: $("#pageList"),
   pageForm: $("#pageForm"),
   activePageLabel: $("#activePageLabel"),
@@ -113,6 +120,7 @@ const refs = {
   pageMood: $("#pageMood"),
   pageLighting: $("#pageLighting"),
   textSpace: $("#textSpace"),
+  textSpaceField: $("#textSpaceField"),
   composition: $("#composition"),
   pageTextScale: $("#pageTextScale"),
   pageTextScaleValue: $("#pageTextScaleValue"),
@@ -187,14 +195,6 @@ const defaultPage = (number = 1, layout = DEFAULT_PAGE_LAYOUT) => ({
 
 const defaultBook = (title = "Untitled Book") => {
   const firstPage = defaultPage(1);
-  const backCoverPage = defaultPage(2);
-  Object.assign(backCoverPage, {
-    id: BACK_COVER_PAGE_ID,
-    number: 2,
-    text: "",
-    layout: "stacked-image-top",
-    textSpace: defaultTextSpaceForLayout("stacked-image-top"),
-  });
   return {
     id: makeId(),
     projectTitle: title,
@@ -202,10 +202,12 @@ const defaultBook = (title = "Untitled Book") => {
     coverFileName: "",
     coverPreviewUrl: "",
     coverReferenceUrl: "",
-    backCoverSummary: "",
-    backCoverImageFileName: "",
-    backCoverPhotoUrl: "",
-    backCoverPage,
+    includeFrontCoverInPdf: false,
+    backCoverFileName: "",
+    backCoverPreviewUrl: "",
+    backCoverReferenceUrl: "",
+    includeBackCoverInPdf: false,
+    publishVersion: 1,
     audience: "3-8",
     suggestedPageCount: "",
     manuscript: "",
@@ -243,6 +245,7 @@ const defaultState = () => {
     activeBookId: book.id,
     selectedPreviewPageIds: [],
     authors: ["Kim Stewart", "Tony Stewart"],
+    bookSnapshots: [],
     characters: [],
     status: "Ready",
     statusDetail: "Add page text, describe the scene, and generate the illustration.",
@@ -260,6 +263,11 @@ const legacyBookFromState = (parsed) => {
     coverFileName: parsed.coverFileName || "",
     coverPreviewUrl: parsed.coverPreviewUrl || "",
     coverReferenceUrl: parsed.coverReferenceUrl || "",
+    includeFrontCoverInPdf: parsed.includeFrontCoverInPdf === true,
+    backCoverFileName: parsed.backCoverFileName || "",
+    backCoverPreviewUrl: parsed.backCoverPreviewUrl || "",
+    backCoverReferenceUrl: parsed.backCoverReferenceUrl || "",
+    includeBackCoverInPdf: parsed.includeBackCoverInPdf === true,
     backCoverSummary: parsed.backCoverSummary || "",
     backCoverImageFileName: parsed.backCoverImageFileName || "",
     backCoverPhotoUrl: parsed.backCoverPhotoUrl || "",
@@ -300,6 +308,7 @@ function normalizeLoadedState(parsed) {
       activeBookId: book.id,
       selectedPreviewPageIds,
       authors: normalizeAuthors(parsed.authors, book.authorName),
+      bookSnapshots: normalizeBookSnapshots(parsed.bookSnapshots),
       characters: [],
       status: "Ready",
       statusDetail: fallback.statusDetail,
@@ -315,6 +324,7 @@ function normalizeLoadedState(parsed) {
     ...parsed,
     books,
     activeBookId,
+    bookSnapshots: normalizeBookSnapshots(parsed.bookSnapshots),
     selectedPreviewPageIds: normalizeSelectedPreviewPageIds(parsed.selectedPreviewPageIds, activeBook),
     authors: normalizeAuthors(parsed.authors, books.map((book) => book.authorName)),
     characters: [],
@@ -328,11 +338,11 @@ function normalizeLoadedState(parsed) {
 function loadStateFromLocalStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultState();
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
     return normalizeLoadedState(parsed);
   } catch {
-    return defaultState();
+    return null;
   }
 }
 
@@ -444,10 +454,17 @@ function normalizeBook(book) {
     printSize: normalizePrintSize(book.printSize),
     pages,
   };
-  normalized.backCoverPage = normalizeBackCoverPage(book.backCoverPage || {}, normalized);
-  syncBackCoverPageFields(normalized);
-  normalized.manuscript = ensureBackCoverSection(normalized.manuscript, normalized.backCoverSummary);
-  if (!normalized.activePageId || (!normalized.pages.some((page) => page.id === normalized.activePageId) && !isBackCoverPageId(normalized.activePageId))) {
+  normalized.includeFrontCoverInPdf = normalized.includeFrontCoverInPdf === true;
+  normalized.includeBackCoverInPdf = normalized.includeBackCoverInPdf === true;
+  normalized.publishVersion = Math.max(1, Math.floor(Number(normalized.publishVersion) || 1));
+  normalized.manuscript = String(normalized.manuscript || "")
+    .replace(/^\s*---\s*Back\s+Cover\s*---\s*$[\s\S]*$/im, "")
+    .trim();
+  delete normalized.backCoverPage;
+  delete normalized.backCoverSummary;
+  delete normalized.backCoverPhotoUrl;
+  delete normalized.backCoverImageFileName;
+  if (!normalized.activePageId || !normalized.pages.some((page) => page.id === normalized.activePageId)) {
     normalized.activePageId = normalized.pages[0]?.id || "";
   }
   normalized.pages = normalized.pages.map((page) => ({
@@ -471,6 +488,23 @@ function normalizeBook(book) {
   normalized.imageLibrary = normalizeGeneratedImageLibrary(normalized.imageLibrary, normalized.pages);
   normalized.linkedPagePairs = normalizeLinkedPagePairs(normalized.linkedPagePairs, normalized.pages);
   return normalized;
+}
+
+function normalizeBookSnapshots(value) {
+  return (Array.isArray(value) ? value : [])
+    .filter((snapshot) => snapshot && typeof snapshot === "object" && snapshot.book && typeof snapshot.book === "object")
+    .map((snapshot) => ({
+      id: String(snapshot.id || makeId()),
+      bookId: String(snapshot.bookId || snapshot.book.id || ""),
+      label: String(snapshot.label || "Saved revision").trim() || "Saved revision",
+      createdAt: String(snapshot.createdAt || new Date().toISOString()),
+      book: snapshot.book,
+    }));
+}
+
+function cloneSerializable(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
 }
 
 function normalizeLinkedPagePairs(linkedPagePairs, pages = []) {
@@ -506,7 +540,6 @@ function hasLinkedPagePair(book, firstPageId, secondPageId) {
 }
 
 function previewSelectionForPage(book, pageId) {
-  if (isBackCoverPageId(pageId)) return [BACK_COVER_PAGE_ID];
   const pages = Array.isArray(book?.pages) ? book.pages : [];
   const pageIndex = pages.findIndex((page) => page.id === pageId);
   if (pageIndex < 0) return [];
@@ -647,10 +680,6 @@ function isBackCoverPageId(pageId) {
 }
 
 function editablePageById(book, pageId) {
-  if (isBackCoverPageId(pageId)) {
-    syncBackCoverPageFields(book);
-    return book.backCoverPage;
-  }
   return book.pages.find((page) => page.id === pageId);
 }
 
@@ -887,6 +916,10 @@ function fontLabel(fontPreset) {
 
 function layoutLabel(layout) {
   switch (normalizeLayout(layout)) {
+    case "single-image-only":
+      return "Single page: image only";
+    case "single-text-only":
+      return "Single page: text only";
     case "stacked-text-top":
       return "Text top, image bottom";
     case "single-overlay-top":
@@ -915,6 +948,8 @@ function layoutLabel(layout) {
 
 function layoutMode(layout) {
   const value = normalizeLayout(layout);
+  if (value === "single-image-only") return "image-only";
+  if (value === "single-text-only") return "text-only";
   if (value.startsWith("single-overlay-")) return "single-overlay";
   if (value.startsWith("spread-")) return "spread";
   if (value.startsWith("overlay")) return "overlay";
@@ -968,6 +1003,7 @@ function overlayTextAreaForLayout(layout) {
 
 function defaultTextSpaceForLayout(layout) {
   switch (normalizeLayout(layout)) {
+    case "single-text-only":
     case "stacked-text-top":
     case "spread-text-left":
     case "spread-image-left":
@@ -1112,6 +1148,20 @@ function legacyOverlayAlignments(layout) {
 
 function layoutIcon(layout) {
   switch (normalizeLayout(layout)) {
+    case "single-image-only":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-page" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <path class="layout-icon-image" d="M5 17l4-5 3 3 3-4 4 6V5H5z"></path>
+        </svg>
+      `;
+    case "single-text-only":
+      return `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect class="layout-icon-page" x="3" y="3" width="18" height="18" rx="2"></rect>
+          <rect class="layout-icon-text" x="6" y="6" width="12" height="12" rx="1.5"></rect>
+        </svg>
+      `;
     case "stacked-text-top":
       return `
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1636,21 +1686,15 @@ async function fitImageFileToPrintDataUrl(file, printSize) {
 function render() {
   ensureBookPresence();
   const book = activeBook();
-  if (hasTextOutsideTextSlots(book)) {
-    reflowManuscriptTextIntoTextSlots(book);
-    touchBook(book);
-    saveState();
-  }
   const page = activePage();
   refs.projectTitle.value = book.projectTitle;
   refs.authorSelect.value = book.authorName || "";
   refs.newAuthorName.value = "";
   refs.printSizeSelect.value = normalizePrintSize(book.printSize);
   refs.printSizeToolbar.innerHTML = renderPrintSizeToolbar(book.printSize);
-  refs.backCoverSummary.value = book.backCoverSummary || "";
   refs.audienceSelect.value = book.audience || "3-8";
   syncPageCountControl(book);
-  refs.storyManuscript.value = ensureBackCoverSection(book.manuscript, book.backCoverSummary);
+  refs.storyManuscript.value = book.manuscript || "";
   refs.buildPagesButton.textContent = book.pages.length ? "Rebuild page drafts" : "Create page drafts";
   refs.sceneDescription.value = page.sceneDescription;
   refs.pageCharacters.value = page.characters;
@@ -1658,13 +1702,14 @@ function render() {
   refs.pageMood.value = page.mood;
   refs.pageLighting.value = page.lighting;
   refs.textSpace.value = resolvedTextSpaceForPage(page);
+  refs.textSpaceField.hidden = layoutMode(page.layout) === "image-only";
   refs.composition.value = page.composition;
-  if (refs.activePageLabel) refs.activePageLabel.textContent = isBackCoverPageId(page.id) ? "Back Cover" : `Page ${page.number}`;
+  if (refs.activePageLabel) refs.activePageLabel.textContent = `Page ${page.number + 1}`;
   refs.promptOutput.value = page.prompt || "";
   refs.updatePromptButton.disabled = false;
   refs.copyPromptButton.disabled = !page.prompt;
-  refs.duplicatePageButton.disabled = isBackCoverPageId(page.id);
-  refs.deletePageButton.disabled = book.pages.length <= 1 || isBackCoverPageId(page.id);
+  refs.duplicatePageButton.disabled = false;
+  refs.deletePageButton.disabled = book.pages.length <= 1;
   if (refs.publishBookButton) {
     refs.publishBookButton.disabled = !book.pages.length || bookPublishing;
     refs.publishBookButton.textContent = bookPublishing ? "Publishing..." : "Publish";
@@ -1672,11 +1717,9 @@ function render() {
     refs.publishBookButton.setAttribute("aria-busy", bookPublishing ? "true" : "false");
   }
 
-  refs.coverPreview.innerHTML = book.coverPreviewUrl
-    ? `<img src="${book.coverPreviewUrl}" alt="Style reference cover" />`
-    : `<div class="empty-state">No cover loaded</div>`;
 
   renderBookSelect();
+  renderBookStateControls();
   renderAuthorSelect();
   renderPageList();
   renderCharacters();
@@ -1700,6 +1743,31 @@ function renderBookSelect() {
       return `<option value="${book.id}"${selected}>${escapeHtml(title)}</option>`;
     })
     .join("");
+}
+
+function snapshotsForActiveBook() {
+  return (Array.isArray(state.bookSnapshots) ? state.bookSnapshots : [])
+    .filter((snapshot) => snapshot.bookId === state.activeBookId)
+    .sort((first, second) => String(second.createdAt).localeCompare(String(first.createdAt)));
+}
+
+function renderBookStateControls() {
+  const snapshots = snapshotsForActiveBook();
+  const previousSelection = refs.bookStateSelect.value;
+  refs.bookStateSelect.innerHTML = snapshots.length
+    ? snapshots
+        .map((snapshot) => {
+          const date = new Date(snapshot.createdAt);
+          const dateLabel = Number.isNaN(date.getTime()) ? "" : ` — ${date.toLocaleString()}`;
+          return `<option value="${escapeHtml(snapshot.id)}">${escapeHtml(snapshot.label + dateLabel)}</option>`;
+        })
+        .join("")
+    : `<option value="">No saved revisions</option>`;
+  if (snapshots.some((snapshot) => snapshot.id === previousSelection)) {
+    refs.bookStateSelect.value = previousSelection;
+  }
+  refs.restoreBookStateButton.disabled = !snapshots.length;
+  refs.deleteBookStateButton.disabled = !snapshots.length;
 }
 
 function renderAuthorSelect() {
@@ -1726,7 +1794,7 @@ function renderPageList() {
       const layout = layoutLabel(page.layout);
       return `
         <button class="page-list-item${selected}" type="button" data-page-id="${page.id}">
-          <span class="page-number">${page.number}</span>
+          <span class="page-number">${page.number + 1}</span>
           <span class="page-list-copy">
             <strong>${escapeHtml(title)}</strong>
             <small>${imageStatus} - ${escapeHtml(layout)}</small>
@@ -1735,17 +1803,7 @@ function renderPageList() {
       `;
     })
     .join("");
-  const backCoverTitle = book.backCoverSummary?.trim() || "Back cover note";
-  const backCoverStatus = book.backCoverPhotoUrl ? "Photo attached" : "No back cover image";
-  refs.pageList.innerHTML = `${pageItems}
-    <button class="page-list-item back-cover-page-list-item${isBackCoverPageId(book.activePageId) ? " is-active" : ""}" type="button" data-back-cover-list-item="true">
-      <span class="page-number">BC</span>
-      <span class="page-list-copy">
-        <strong>${escapeHtml(backCoverTitle)}</strong>
-        <small>Back Cover - ${escapeHtml(backCoverStatus)}</small>
-      </span>
-    </button>
-  `;
+  refs.pageList.innerHTML = pageItems;
 }
 
 function normalizeCharacterRecord(character = {}) {
@@ -2001,7 +2059,7 @@ function renderBookPreview() {
 const pendingImageDimensionLoads = new Set();
 
 function syncMissingPageImageDimensions(book) {
-  const pages = [...(Array.isArray(book?.pages) ? book.pages : []), book?.backCoverPage].filter(Boolean);
+  const pages = Array.isArray(book?.pages) ? book.pages : [];
   pages
     .filter((page) => page?.imageUrl && (!Number(page.imageNaturalWidth) || !Number(page.imageNaturalHeight)))
     .forEach((page) => {
@@ -2037,7 +2095,7 @@ function syncMissingPageImageDimensions(book) {
 }
 
 function syncImageFrameAspects(book) {
-  const pages = [...(Array.isArray(book?.pages) ? book.pages : []), book?.backCoverPage].filter(Boolean);
+  const pages = Array.isArray(book?.pages) ? book.pages : [];
   refs.fullBookPreview.querySelectorAll(".page-art-frame[data-page-id]").forEach((frame) => {
     const page = pages.find((item) => item.id === frame.dataset.pageId);
     if (!page) return;
@@ -2252,6 +2310,10 @@ function renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole =
       ? `<div class="mini-single-page mini-single-page-text">${textMarkup}</div>`
       : spreadRole === "image"
       ? `<div class="mini-single-page mini-single-page-image">${imageMarkup}</div>`
+      : layout === "single-text-only"
+      ? `<div class="mini-single-page mini-single-page-text">${textMarkup}</div>`
+      : layout === "single-image-only"
+      ? `<div class="mini-single-page mini-single-page-image">${imageMarkup}</div>`
       : layoutMode(layout) === "spread"
       ? `<div class="mini-spread">
           <div class="mini-spread-side">${layout === "spread-text-left" ? textMarkup : imageMarkup}</div>
@@ -2273,6 +2335,52 @@ function renderFullBookPageCard(book, page, activeGeneratingPageId, spreadRole =
   `;
 }
 
+function renderCoverPageCard(book, kind, displayNumber) {
+  const isFront = kind === "front";
+  const imageUrl = isFront ? book.coverPreviewUrl : book.backCoverPreviewUrl;
+  const fileName = isFront ? book.coverFileName : book.backCoverFileName;
+  const included = isFront ? book.includeFrontCoverInPdf : book.includeBackCoverInPdf;
+  const label = isFront ? "Front Cover" : "Back Cover";
+  const coverPage = {
+    ...defaultPage(displayNumber, "single-image-only"),
+    id: `__${kind}_cover_card__`,
+    number: displayNumber,
+    layout: "single-image-only",
+    imageUrl: imageUrl || "",
+    fileName: fileName || "",
+  };
+  return `
+    <article class="page-slider-card cover-page-card" data-cover-kind="${kind}">
+      <div class="page-slider-card-head">
+        <div class="page-slider-card-head-row">
+          <div class="page-slider-card-focus cover-page-card-title">
+            <strong>Page ${displayNumber} · ${label}</strong>
+            <span>${escapeHtml(layoutLabel("single-image-only"))}</span>
+          </div>
+          <label class="ghost-button icon-button file-button" aria-label="Upload ${label.toLowerCase()}" title="Upload ${label.toLowerCase()}">
+            <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21V11m0 0l4 4m-4-4-4 4M5 5h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+            </svg>
+            <input type="file" accept="image/*" data-cover-upload="${kind}" />
+          </label>
+          <button class="ghost-button icon-button" type="button" data-clear-cover="${kind}" aria-label="Clear ${label.toLowerCase()}" title="Clear ${label.toLowerCase()}" ${imageUrl ? "" : "disabled"}>
+            <svg class="icon-updown" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M9 7V5h6v2m-7 0 1 12h6l1-12M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+            </svg>
+          </button>
+        </div>
+        <label class="checkbox-row cover-pdf-option">
+          <input type="checkbox" data-include-cover="${kind}" ${included ? "checked" : ""} ${imageUrl ? "" : "disabled"} />
+          <span>Include ${isFront ? "front" : "back"} cover in PDF</span>
+        </label>
+      </div>
+      <div class="page-slider-card-body">
+        ${renderFullBookPageCard(book, coverPage, "")}
+      </div>
+    </article>
+  `;
+}
+
 function selectedPreviewPages(book) {
   selectedPreviewPageIds = normalizeSelectedPreviewPageIds(selectedPreviewPageIds, book);
   state.selectedPreviewPageIds = [...selectedPreviewPageIds];
@@ -2290,7 +2398,7 @@ function selectedPreviewPages(book) {
 
 function normalizeSelectedPreviewPageIds(value, book) {
   const pages = Array.isArray(book?.pages) ? book.pages : [];
-  const validIds = [...new Set((Array.isArray(value) ? value : []).filter((id) => pages.some((page) => page.id === id) || isBackCoverPageId(id)))].slice(0, 2);
+  const validIds = [...new Set((Array.isArray(value) ? value : []).filter((id) => pages.some((page) => page.id === id)))].slice(0, 2);
   if (!validIds.length) {
     const fallbackId = book?.activePageId || pages[0]?.id || "";
     return fallbackId ? [fallbackId] : [];
@@ -2347,14 +2455,14 @@ function renderContextualPreviewToolbar(book, pages) {
   return `
     <section class="contextual-page-toolbar" data-page-id="${escapeHtml(pageIds)}">
       <div class="contextual-page-toolbar-head">
-        <strong>${isPair ? `Pages ${targetPages[0].number} + ${targetPages[1].number}` : isBackCoverPageId(sourcePage.id) ? "Back Cover" : `Page ${sourcePage.number}`}</strong>
+        <strong>${isPair ? `Pages ${targetPages[0].number + 1} + ${targetPages[1].number + 1}` : `Page ${sourcePage.number + 1}`}</strong>
         <span>${isPair ? "Two-page layouts unlocked" : "Select one more page for spread layouts"}</span>
       </div>
       <div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Layout</span>
         ${renderPreviewLayoutToolbar(layout, pageIds, layoutOptions)}
       </div>
-      <div class="contextual-toolbar-section">
+      ${layoutMode(layout) === "image-only" ? "" : `<div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Text</span>
         ${renderPreviewFontToolbar(sourcePage.fontPreset, pageIds)}
         ${renderPreviewTextVerticalToolbarCompact(sourcePage.textVerticalAlign, pageIds)}
@@ -2368,8 +2476,8 @@ function renderContextualPreviewToolbar(book, pages) {
         >
           Apply to all pages
         </button>
-      </div>
-      <div class="contextual-toolbar-section">
+      </div>`}
+      ${layoutMode(layout) === "text-only" ? "" : `<div class="contextual-toolbar-section">
         <span class="contextual-toolbar-label">Image</span>
         ${renderPageActions(book, imagePage, isGeneratingSourcePage)}
         <div class="page-image-nudge-group">
@@ -2384,7 +2492,7 @@ function renderContextualPreviewToolbar(book, pages) {
           <button class="ghost-button icon-button" type="button" data-page-id="${imagePageId}" data-image-scale-step="0.12" aria-label="Scale image larger" title="Scale image larger"${hasImage ? "" : " disabled"}>+</button>
         </div>
         ${renderGeneratedImagePicker(book, imagePage)}
-      </div>
+      </div>`}
     </section>
   `;
 }
@@ -2429,51 +2537,11 @@ function renderSelectedPairPreview(book, leftPage, rightPage, activeGeneratingPa
   `;
 }
 
-function renderBackCoverPreviewCard(book) {
-  syncBackCoverPageFields(book);
-  const page = book.backCoverPage;
-  const isFocused = page.id === book.activePageId;
-  const isSelected = selectedPreviewPageIds.includes(page.id);
-  return `
-    <article
-      class="page-slider-card back-cover-preview-card${isFocused ? " is-focused" : ""}${isSelected ? " is-selected" : ""}"
-      data-page-id="${BACK_COVER_PAGE_ID}"
-      data-back-cover-preview-card="true"
-    >
-      <div class="page-slider-card-head">
-        <div class="page-slider-card-head-row">
-          <button
-            class="page-slider-card-focus"
-            type="button"
-            data-focus-preview-page="${BACK_COVER_PAGE_ID}"
-            aria-label="Focus back cover"
-          >
-            <strong>Back Cover</strong>
-            <span>${escapeHtml(layoutLabel(page.layout))}</span>
-          </button>
-          <button
-            class="page-selection-toggle${isSelected ? " is-active" : ""}"
-            type="button"
-            data-toggle-preview-selection="${BACK_COVER_PAGE_ID}"
-            aria-pressed="${isSelected}"
-            title="${isSelected ? "Remove back cover from layout selection" : "Select back cover for layout"}"
-          >
-            ${isSelected ? "Selected" : "Select"}
-          </button>
-        </div>
-      </div>
-      <div class="page-slider-card-body">
-        ${renderFullBookPageCard(book, page, state.isGenerating ? state.generatingPageId : "")}
-      </div>
-    </article>
-  `;
-}
-
 function renderFullBookPreviewMarkup(book) {
   const activeGeneratingPageId = state.isGenerating ? state.generatingPageId || activeBook().activePageId : "";
   const selectedPages = selectedPreviewPages(book);
   const selectedIds = new Set(selectedPages.map((page) => page.id));
-  const pageCards = [];
+  const pageCards = [renderCoverPageCard(book, "front", 1)];
   for (let pageIndex = 0; pageIndex < book.pages.length; pageIndex += 1) {
     const page = book.pages[pageIndex];
     const nextPage = book.pages[pageIndex + 1];
@@ -2539,7 +2607,7 @@ function renderFullBookPreviewMarkup(book) {
               data-focus-preview-page="${escapeHtml(page.id)}"
               aria-label="Focus page ${page.number}"
             >
-              <strong>Page ${page.number}</strong>
+              <strong>Page ${page.number + 1}</strong>
               <span>${escapeHtml(layoutLabel(page.layout))}</span>
             </button>
             <button
@@ -2561,12 +2629,12 @@ function renderFullBookPreviewMarkup(book) {
     `;
     pageCards.push(card);
   }
-  pageCards.push(renderBackCoverPreviewCard(book));
+  pageCards.push(renderCoverPageCard(book, "back", book.pages.length + 2));
   return `
     <div class="full-book-preview-head">
       <div class="full-book-preview-head-copy">
         <strong>${escapeHtml(book.projectTitle || "Untitled Book")}</strong>
-        <span>${book.pages.length} pages + back cover</span>
+        <span>${book.pages.length + 2} pages including covers</span>
       </div>
     </div>
     ${renderContextualPreviewToolbar(book, selectedPages)}
@@ -2825,6 +2893,90 @@ function addPage() {
   render();
 }
 
+function saveBookSnapshot() {
+  const book = activeBook();
+  const now = new Date();
+  const requestedLabel = refs.bookStateName.value.trim();
+  const snapshot = {
+    id: makeId(),
+    bookId: book.id,
+    label: requestedLabel || `Revision ${now.toLocaleString()}`,
+    createdAt: now.toISOString(),
+    book: cloneSerializable(book),
+  };
+  state.bookSnapshots = [...(Array.isArray(state.bookSnapshots) ? state.bookSnapshots : []), snapshot];
+  refs.bookStateName.value = "";
+  touchActiveBook();
+  saveState();
+  renderBookStateControls();
+  refs.bookStateSelect.value = snapshot.id;
+  setStatus("Book revision saved", `"${snapshot.label}" is available to restore.`);
+  renderStatsOnly();
+}
+
+function restoreBookSnapshot() {
+  const snapshotId = refs.bookStateSelect.value;
+  const snapshot = (state.bookSnapshots || []).find(
+    (item) => item.id === snapshotId && item.bookId === state.activeBookId,
+  );
+  if (!snapshot) return;
+  const approved = window.confirm(
+    `Restore "${snapshot.label}"? Your current unsaved book changes will be replaced.`,
+  );
+  if (!approved) return;
+  const bookIndex = state.books.findIndex((book) => book.id === state.activeBookId);
+  if (bookIndex < 0) return;
+  const restoredBook = normalizeBook(cloneSerializable(snapshot.book));
+  restoredBook.id = state.activeBookId;
+  state.books[bookIndex] = restoredBook;
+  selectedPreviewPageIds = [];
+  state.selectedPreviewPageIds = [];
+  saveState();
+  setStatus("Book revision restored", `"${snapshot.label}" is now the active version.`);
+  render();
+}
+
+function deleteBookSnapshot() {
+  const snapshotId = refs.bookStateSelect.value;
+  const snapshot = (state.bookSnapshots || []).find(
+    (item) => item.id === snapshotId && item.bookId === state.activeBookId,
+  );
+  if (!snapshot) return;
+  const approved = window.confirm(`Delete the book revision "${snapshot.label}"?`);
+  if (!approved) return;
+  state.bookSnapshots = state.bookSnapshots.filter((item) => item.id !== snapshot.id);
+  saveState();
+  setStatus("Book revision deleted", `"${snapshot.label}" was removed.`);
+  renderBookStateControls();
+  renderStatsOnly();
+}
+
+function insertPageRelativeToActive(offset) {
+  const book = activeBook();
+  const activeIndex = book.pages.findIndex((page) => page.id === book.activePageId);
+  if (activeIndex < 0) return;
+  const insertIndex = activeIndex + (offset > 0 ? 1 : 0);
+  const page = defaultPage(insertIndex + 1, defaultLayoutForAudience(book.audience));
+  book.pages.splice(insertIndex, 0, page);
+  renumberPages(book);
+  book.linkedPagePairs = normalizeLinkedPagePairs(book.linkedPagePairs, book.pages);
+  book.activePageId = page.id;
+  selectedPreviewPageIds = previewSelectionForPage(book, page.id);
+  syncManuscriptFromPages(book);
+  touchActiveBook();
+  saveState();
+  setStatus("Page added", `Page ${page.number} was inserted ${offset > 0 ? "after" : "before"} the selected page.`);
+  render();
+}
+
+function addPageBefore() {
+  insertPageRelativeToActive(-1);
+}
+
+function addPageAfter() {
+  insertPageRelativeToActive(1);
+}
+
 function duplicatePage() {
   const book = activeBook();
   const source = activePage();
@@ -3055,6 +3207,30 @@ async function publishBook() {
     return;
   }
 
+  const publishDate = new Date();
+  const datePart = [
+    publishDate.getFullYear(),
+    String(publishDate.getMonth() + 1).padStart(2, "0"),
+    String(publishDate.getDate()).padStart(2, "0"),
+  ].join("-");
+  const titlePart = String(book.projectTitle || "book")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "book";
+  const publishVersion = Math.max(1, Math.floor(Number(book.publishVersion) || 1));
+  const defaultFileName = `${titlePart}-v${publishVersion}-${datePart}.pdf`;
+  const requestedFileName = window.prompt("What name would you like to give the published PDF?", defaultFileName);
+  if (requestedFileName === null) {
+    setStatus("Publish canceled", "No PDF was created.");
+    return;
+  }
+  const fileName = requestedFileName.trim();
+  if (!fileName) {
+    setStatus("Filename required", "Enter a name for the published PDF.");
+    return;
+  }
+
   saveState();
   bookPublishing = true;
   if (refs.publishBookButton) {
@@ -3070,7 +3246,7 @@ async function publishBook() {
     const response = await fetch("/api/publish-book", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ book }),
+      body: JSON.stringify({ book, file_name: fileName }),
     });
     const result = await response.json();
     if (!response.ok) {
@@ -3082,6 +3258,9 @@ async function publishBook() {
     document.body.appendChild(downloadLink);
     downloadLink.click();
     downloadLink.remove();
+    book.publishVersion = publishVersion + 1;
+    touchActiveBook();
+    saveState();
     setStatus("Book published", `PDF ready for download: ${result.file_name || "book.pdf"}`);
   } catch (error) {
     setStatus("Publish failed", error.message || "Could not create the PDF.");
@@ -3112,6 +3291,20 @@ async function handleCoverFile(file) {
   touchActiveBook();
   saveState();
   setStatus("Cover loaded", "The cover will guide new page illustrations.");
+  render();
+}
+
+async function handleBackCoverFile(file) {
+  const book = activeBook();
+  setStatus("Preparing back cover", "Resizing the back cover locally for publishing.");
+  const previewResult = await resizeFileToDataUrl(file, 900, 0.9);
+  const referenceResult = await resizeFileToDataUrl(file, 1400, 0.9);
+  book.backCoverFileName = file.name;
+  book.backCoverPreviewUrl = previewResult.dataUrl;
+  book.backCoverReferenceUrl = referenceResult.dataUrl;
+  touchActiveBook();
+  saveState();
+  setStatus("Back cover loaded", "Enable the PDF option when you want to publish it.");
   render();
 }
 
@@ -3466,11 +3659,10 @@ function createStartedBook() {
   book.audience = refs.startAudienceSelect.value;
   book.suggestedPageCount = refs.startPageCount.value;
   book.manuscript = manuscript;
-  book.backCoverSummary = extractBackCoverTextFromManuscript(manuscript) || book.backCoverSummary;
   if (author) state.authors = normalizeAuthors(state.authors, author);
   const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
   book.pages = pagesFromTextBlocks(book, pageTexts);
-  book.manuscript = formatManuscriptWithPageBreaks(pageTexts, book.backCoverSummary);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
   book.activePageId = book.pages[0]?.id || "";
   touchBook(book);
   state.books.push(book);
@@ -3504,9 +3696,8 @@ function buildPagesFromStory() {
   }
 
   const pageTexts = splitStoryIntoPages(manuscript, book.audience, Number(book.suggestedPageCount));
-  book.backCoverSummary = extractBackCoverTextFromManuscript(manuscript) || book.backCoverSummary;
   book.pages = pagesFromTextBlocks(book, pageTexts);
-  book.manuscript = formatManuscriptWithPageBreaks(pageTexts, book.backCoverSummary);
+  book.manuscript = formatManuscriptWithPageBreaks(pageTexts);
   book.activePageId = book.pages[0]?.id || "";
   touchActiveBook();
   saveState();
@@ -3591,91 +3782,60 @@ function hasTextOutsideTextSlots(book) {
 }
 
 function syncManuscriptFromPages(book) {
-  const sections = textSlotPages(book)
-    .filter((page) => String(page.text || "").trim())
+  const sections = book.pages
     .map((page) => ({ number: page.number, text: page.text || "" }));
-  book.manuscript = formatManuscriptWithPageBreaks(sections, book.backCoverSummary);
-}
-
-function splitBackCoverSection(manuscript) {
-  const raw = String(manuscript || "").replace(/\r/g, "");
-  const match = raw.match(/^\s*---\s*Back\s+Cover\s*---\s*$/im);
-  if (!match) {
-    return { body: raw, backCoverText: "" };
-  }
-  return {
-    body: raw.slice(0, match.index).trim(),
-    backCoverText: raw.slice(match.index + match[0].length).trim(),
-  };
-}
-
-function extractBackCoverTextFromManuscript(manuscript) {
-  return splitBackCoverSection(manuscript).backCoverText;
-}
-
-function ensureBackCoverSection(manuscript, backCoverText = "") {
-  const text = String(backCoverText || "").trim();
-  if (!text) return String(manuscript || "");
-  const parts = splitBackCoverSection(manuscript);
-  if (parts.backCoverText) return String(manuscript || "");
-  const body = parts.body.trim();
-  return [body, `--- Back Cover ---\n${text}`].filter(Boolean).join("\n\n--------------------------------\n\n");
+  book.manuscript = formatManuscriptWithPageBreaks(sections);
 }
 
 function extractPageTextsFromManuscript(manuscript) {
-  const lines = splitBackCoverSection(manuscript).body.split(/\r?\n/);
-  const blocks = [];
-  let current = [];
-  let sawPageHeader = false;
+  return extractNumberedPageSections(manuscript).map((section) => section.text);
+}
+
+function extractNumberedPageSections(manuscript) {
+  const lines = String(manuscript || "").split(/\r?\n/);
+  const sections = [];
+  let current = null;
+  let currentNumber = 0;
 
   for (const line of lines) {
-    if (/^\s*---\s*Page\s+\d+\s*---\s*$/i.test(line)) {
-      sawPageHeader = true;
-      if (current.length) {
-        blocks.push(current.join("\n").trim());
-        current = [];
+    const header = line.match(/^\s*---\s*Page\s+(\d+)\s*---\s*$/i);
+    if (header) {
+      if (current !== null) {
+        sections.push({ number: currentNumber, text: current.join("\n").trim() });
       }
+      currentNumber = Math.max(1, Number(header[1]) || 1);
+      current = [];
       continue;
     }
 
     if (/^\s*-{8,}\s*$/.test(line)) {
-      if (current.length) {
-        blocks.push(current.join("\n").trim());
-        current = [];
-      }
       continue;
     }
 
-    current.push(line);
+    if (current !== null) current.push(line);
   }
 
-  if (current.length) blocks.push(current.join("\n").trim());
+  if (current !== null) {
+    sections.push({ number: currentNumber, text: current.join("\n").trim() });
+  }
 
-  const cleaned = blocks.map((block) => block.trim()).filter(Boolean);
-  return sawPageHeader ? cleaned : [];
+  return sections;
 }
 
 function syncPagesFromManuscript(book) {
-  const pageTexts = extractPageTextsFromManuscript(book.manuscript);
-  const backCoverText = extractBackCoverTextFromManuscript(book.manuscript);
-  if (backCoverText) {
-    book.backCoverSummary = backCoverText;
-    book.backCoverPage = normalizeBackCoverPage({ ...book.backCoverPage, text: backCoverText }, book);
-    if (refs.backCoverSummary) refs.backCoverSummary.value = backCoverText;
-  }
-  if (!pageTexts.length) return false;
+  const sections = extractNumberedPageSections(book.manuscript);
+  if (!sections.length) return false;
 
-  ensureTextSlotCapacity(book, pageTexts.length);
-  const slotIds = new Set(textSlotPages(book).map((page) => page.id));
-  let textIndex = 0;
+  const lastPageNumber = Math.max(...sections.map((section) => section.number));
+  while (book.pages.length < lastPageNumber) {
+    book.pages.push(defaultPage(book.pages.length + 1, defaultLayoutForAudience(book.audience)));
+  }
+  renumberPages(book);
+  const textByPageNumber = new Map(sections.map((section) => [section.number, section.text]));
   book.pages.forEach((page) => {
-    if (slotIds.has(page.id)) {
-      page.text = pageTexts[textIndex] || "";
-      textIndex += 1;
-    } else {
-      page.text = "";
-    }
+    page.text = textByPageNumber.get(page.number) || "";
   });
+  book.linkedPagePairs = normalizeLinkedPagePairs(book.linkedPagePairs, book.pages);
   if (!book.pages.some((page) => page.id === book.activePageId)) {
     book.activePageId = book.pages[0]?.id || "";
   }
@@ -3684,7 +3844,7 @@ function syncPagesFromManuscript(book) {
 }
 
 function splitStoryIntoPages(text, audience, requestedCount) {
-  const clean = stripPageBreakMarkers(splitBackCoverSection(text).body).replace(/\s+/g, " ").trim();
+  const clean = stripPageBreakMarkers(text).replace(/\s+/g, " ").trim();
   const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) || [clean];
   const totalWords = countWords(clean);
   const autoCount = automaticPageCount(clean, audience);
@@ -3750,29 +3910,26 @@ function splitStoryIntoPages(text, audience, requestedCount) {
 }
 
 function automaticPageCount(text, audience) {
-  const clean = stripPageBreakMarkers(splitBackCoverSection(text).body).replace(/\s+/g, " ").trim();
+  const clean = stripPageBreakMarkers(text).replace(/\s+/g, " ").trim();
   if (!clean) return 1;
   return Math.max(1, Math.min(64, Math.ceil(countWords(clean) / wordsPerPage(audience))));
 }
 
 function stripPageBreakMarkers(text) {
-  return splitBackCoverSection(text).body
+  return String(text || "")
     .split(/\r?\n/)
     .filter((line) => !/^\s*(?:[-=_]{3,}\s*Page\s+\d+\s*[-=_]{3,}|[-=_]{8,})\s*$/.test(line))
     .join("\n");
 }
 
-function formatManuscriptWithPageBreaks(pageTexts, backCoverText = "") {
+function formatManuscriptWithPageBreaks(pageTexts) {
   const sections = pageTexts.map((entry, index) => {
     const isStructured = entry && typeof entry === "object";
     const number = isStructured ? entry.number || index + 1 : index + 1;
     const text = isStructured ? entry.text || "" : entry || "";
     return [`--- Page ${number} ---`, String(text).trim()].join("\n");
   });
-  const formatted = sections.join("\n\n--------------------------------\n\n");
-  const backCover = String(backCoverText || "").trim();
-  if (!backCover) return formatted;
-  return [formatted, `--- Back Cover ---\n${backCover}`].filter(Boolean).join("\n\n--------------------------------\n\n");
+  return sections.join("\n\n--------------------------------\n\n");
 }
 
 function wordsPerPage(audience) {
@@ -3892,6 +4049,11 @@ refs.newBookButton.addEventListener("click", openStartBookFlow);
 refs.cancelStartBookButton.addEventListener("click", closeStartBookFlow);
 refs.createStartedBookButton.addEventListener("click", createStartedBook);
 refs.addPageButton.addEventListener("click", addPage);
+refs.saveBookStateButton.addEventListener("click", saveBookSnapshot);
+refs.restoreBookStateButton.addEventListener("click", restoreBookSnapshot);
+refs.deleteBookStateButton.addEventListener("click", deleteBookSnapshot);
+refs.addPageBeforeButton.addEventListener("click", addPageBefore);
+refs.addPageAfterButton.addEventListener("click", addPageAfter);
 refs.duplicatePageButton.addEventListener("click", duplicatePage);
 refs.deletePageButton.addEventListener("click", deletePage);
 
@@ -3934,18 +4096,6 @@ refs.printSizeToolbar.addEventListener("click", (event) => {
   touchActiveBook();
   saveState();
   render();
-});
-
-refs.backCoverSummary.addEventListener("input", (event) => {
-  const book = activeBook();
-  book.backCoverSummary = event.target.value;
-  book.backCoverPage = normalizeBackCoverPage({ ...book.backCoverPage, text: book.backCoverSummary }, book);
-  syncManuscriptFromPages(book);
-  refs.storyManuscript.value = book.manuscript;
-  touchActiveBook();
-  saveState();
-  renderPageList();
-  renderBookPreview();
 });
 
 refs.suggestedPageCount.addEventListener("input", (event) => {
@@ -3992,6 +4142,27 @@ refs.publishBookButton.addEventListener("click", () => {
 });
 
 refs.fullBookPreview.addEventListener("click", (event) => {
+  const clearCoverButton = event.target.closest("[data-clear-cover]");
+  if (clearCoverButton) {
+    const book = activeBook();
+    const isFront = clearCoverButton.dataset.clearCover === "front";
+    if (isFront) {
+      book.coverFileName = "";
+      book.coverPreviewUrl = "";
+      book.coverReferenceUrl = "";
+      book.includeFrontCoverInPdf = false;
+    } else {
+      book.backCoverFileName = "";
+      book.backCoverPreviewUrl = "";
+      book.backCoverReferenceUrl = "";
+      book.includeBackCoverInPdf = false;
+    }
+    touchActiveBook();
+    saveState();
+    setStatus(`${isFront ? "Front" : "Back"} cover cleared`, "The cover will not be included when publishing.");
+    render();
+    return;
+  }
   const pageId = event.target.closest(".full-book-page")?.dataset.pageId || activePage().id;
   const pairLinkButton = event.target.closest("[data-link-preview-pages]");
   if (pairLinkButton) {
@@ -4141,12 +4312,12 @@ refs.fullBookPreview.addEventListener("click", (event) => {
       textVerticalAlign: sourcePage.textVerticalAlign,
     };
     updatePagesByIds(
-      [...book.pages.map((page) => page.id), BACK_COVER_PAGE_ID],
+      book.pages.map((page) => page.id),
       sharedTextStyle,
     );
     setStatus(
       "Text style applied",
-      `${fontLabel(sourcePage.fontPreset)}, ${fontPointLabel(book, sourcePage)}, and its alignment now apply to every page and the back cover.`,
+      `${fontLabel(sourcePage.fontPreset)}, ${fontPointLabel(book, sourcePage)}, and its alignment now apply to every page.`,
     );
     render();
     return;
@@ -4228,6 +4399,34 @@ refs.fullBookPreview.addEventListener(
 );
 
 refs.fullBookPreview.addEventListener("change", async (event) => {
+  const coverInput = event.target.closest("[data-cover-upload]");
+  if (coverInput) {
+    const file = coverInput.files?.[0];
+    if (!file) return;
+    try {
+      if (coverInput.dataset.coverUpload === "front") {
+        await handleCoverFile(file);
+      } else {
+        await handleBackCoverFile(file);
+      }
+    } catch (error) {
+      setStatus("Cover upload failed", error.message || "Could not attach the cover image.");
+    }
+    return;
+  }
+  const includeCoverInput = event.target.closest("[data-include-cover]");
+  if (includeCoverInput) {
+    const book = activeBook();
+    const isFront = includeCoverInput.dataset.includeCover === "front";
+    if (isFront) {
+      book.includeFrontCoverInPdf = Boolean(book.coverPreviewUrl && includeCoverInput.checked);
+    } else {
+      book.includeBackCoverInPdf = Boolean(book.backCoverPreviewUrl && includeCoverInput.checked);
+    }
+    touchActiveBook();
+    saveState();
+    return;
+  }
   const uploadInput = event.target.closest("[data-page-upload-input]");
   if (!uploadInput) return;
   const pageId = uploadInput.dataset.pageId;
@@ -4251,10 +4450,6 @@ refs.fullBookPreview.addEventListener("input", (event) => {
   const nextText = normalizeInlinePageText(editor.innerText);
   if (page.text === nextText) return;
   page.text = nextText;
-  if (isBackCoverPageId(pageId)) {
-    syncBackCoverPageFields(activeBook());
-    refs.backCoverSummary.value = activeBook().backCoverSummary;
-  }
   syncManuscriptFromPages(activeBook());
   touchActiveBook();
   saveState();
@@ -4271,10 +4466,6 @@ refs.fullBookPreview.addEventListener("focusout", (event) => {
   const nextText = normalizeInlinePageText(editor.innerText);
   if (page.text !== nextText) {
     page.text = nextText;
-    if (isBackCoverPageId(pageId)) {
-      syncBackCoverPageFields(activeBook());
-      refs.backCoverSummary.value = activeBook().backCoverSummary;
-    }
     syncManuscriptFromPages(activeBook());
     touchActiveBook();
     saveState();
@@ -4285,20 +4476,6 @@ refs.fullBookPreview.addEventListener("focusout", (event) => {
 });
 
 refs.pageList.addEventListener("click", (event) => {
-  const backCoverButton = event.target.closest("[data-back-cover-list-item]");
-  if (backCoverButton) {
-    activeBook().activePageId = BACK_COVER_PAGE_ID;
-    selectedPreviewPageIds = [BACK_COVER_PAGE_ID];
-    saveState();
-    render();
-    refs.fullBookPreview.querySelector("[data-back-cover-preview-card]")?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "center",
-    });
-    setStatus("Back cover selected", "Use the normal page controls to adjust the back cover.");
-    return;
-  }
   const button = event.target.closest("[data-page-id]");
   if (!button) return;
   activeBook().activePageId = button.dataset.pageId;
@@ -4429,24 +4606,6 @@ refs.useCharacterOnPageButton.addEventListener("click", () => {
   appendCharacter(characterDraft.name);
 });
 
-refs.coverInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  await handleCoverFile(file);
-});
-
-refs.clearCoverButton.addEventListener("click", () => {
-  const book = activeBook();
-  book.coverFileName = "";
-  book.coverPreviewUrl = "";
-  book.coverReferenceUrl = "";
-  refs.coverInput.value = "";
-  touchActiveBook();
-  saveState();
-  setStatus("Cover cleared", "New page illustrations will generate without a cover reference.");
-  render();
-});
-
 refs.copyPromptButton.addEventListener("click", async () => {
   const prompt = activePage().prompt;
   if (!prompt) return;
@@ -4468,8 +4627,8 @@ async function bootstrap() {
     state = serverState;
   } else {
     const localState = loadStateFromLocalStorage();
-    state = localState;
-    queueServerStateSave(true);
+    state = localState || defaultState();
+    if (localState) queueServerStateSave(true);
   }
   delete state.previewMode;
   state.isGenerating = false;

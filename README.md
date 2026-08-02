@@ -1,4 +1,4 @@
-# Whoka Story Studio
+# WHOKA Story Studio
 
 A local authoring website for drafting a picture book page by page, then generating illustrations from your page text, character names, and scene direction.
 

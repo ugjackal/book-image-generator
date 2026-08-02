@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Whoka Story Studio</title>
+    <title>WHOKA Story Studio</title>
     <meta name="theme-color" content="#f2b36a" />
     <link rel="icon" href="./assets/whoka-favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/whoka-favicon-32.png" />
@@ -18,7 +18,7 @@
           <img class="brand-logo" src="./assets/whoka-sunrise-logo.png" alt="Whoka constellation tree logo" />
           <div>
             <p class="eyebrow">Whoka Digital Media</p>
-            <h1>Whoka Story Studio</h1>
+            <h1>WHOKA Story Studio</h1>
           </div>
         </div>
         <div class="topbar-actions">
@@ -131,11 +131,6 @@
             </label>
 
             <label class="field">
-              <span>Book cover</span>
-              <input id="coverInput" type="file" accept="image/*" />
-            </label>
-
-            <label class="field">
               <span>Print size</span>
               <div class="print-size-toolbar" id="printSizeToolbar"></div>
               <select id="printSizeSelect">
@@ -146,16 +141,19 @@
               </select>
             </label>
 
-            <div class="cover-preview" id="coverPreview">
-              <div class="empty-state">No cover loaded</div>
+            <div class="field book-state-controls">
+              <span>Book revisions</span>
+              <div class="inline-control">
+                <input id="bookStateName" type="text" placeholder="Revision name (optional)" />
+                <button class="ghost-button" id="saveBookStateButton" type="button">Save Revision</button>
+              </div>
+              <select id="bookStateSelect" aria-label="Book revisions"></select>
+              <div class="button-row">
+                <button class="ghost-button" id="restoreBookStateButton" type="button">Restore</button>
+                <button class="ghost-button danger-button" id="deleteBookStateButton" type="button">Delete</button>
+              </div>
             </div>
 
-            <button class="ghost-button full-width" id="clearCoverButton" type="button">Clear cover</button>
-
-            <label class="field">
-              <span>Back cover summary</span>
-              <textarea id="backCoverSummary" rows="5" placeholder="Write the short summary that should appear on the back of the book."></textarea>
-            </label>
           </section>
 
           <section class="stack page-list-section">
@@ -200,9 +198,8 @@
                 <textarea
                   id="storyManuscript"
                   rows="8"
-                  placeholder="Paste the whole story here, then create page drafts. Add --- Back Cover --- at the end for the back-cover note."
+                  placeholder="Paste the whole story here, then create page drafts."
                 ></textarea>
-                <small>Use <code>--- Back Cover ---</code> at the end of the manuscript to set the back-cover note.</small>
               </label>
             </div>
           </section>
@@ -214,6 +211,8 @@
                 <h2 id="activePageLabel">Page 1</h2>
               </div>
               <div class="button-row">
+                <button class="ghost-button" id="addPageBeforeButton" type="button">Add Page Before</button>
+                <button class="ghost-button" id="addPageAfterButton" type="button">Add Page After</button>
                 <button class="ghost-button" id="duplicatePageButton" type="button">Duplicate</button>
                 <button class="ghost-button danger-button" id="deletePageButton" type="button">Delete</button>
               </div>
@@ -250,7 +249,7 @@
                 <input id="pageLighting" type="text" placeholder="Warm afternoon light" />
               </label>
 
-              <label class="field span-2">
+              <label class="field span-2" id="textSpaceField">
                 <span>Text placement</span>
                 <input id="textSpace" type="text" placeholder="Leave quiet open space at top left for the story text." />
               </label>

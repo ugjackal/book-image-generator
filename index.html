@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Whoka Story Studio</title>
+    <title>WHOKA Story Studio</title>
     <meta name="theme-color" content="#f2b36a" />
     <link rel="icon" href="./assets/whoka-favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/whoka-favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="./assets/whoka-favicon-16.png" />
     <link rel="apple-touch-icon" href="./assets/whoka-apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=physical-page-scale" />
   </head>
   <body>
     <main class="app-shell">
@@ -18,7 +18,7 @@
           <img class="brand-logo" src="./assets/whoka-sunrise-logo.png" alt="Whoka constellation tree logo" />
           <div>
             <p class="eyebrow">Whoka Digital Media</p>
-            <h1>Whoka Story Studio</h1>
+            <h1>WHOKA Story Studio</h1>
           </div>
         </div>
         <div class="topbar-actions">
@@ -131,30 +131,29 @@
             </label>
 
             <label class="field">
-              <span>Book cover</span>
-              <input id="coverInput" type="file" accept="image/*" />
-            </label>
-
-            <label class="field">
               <span>Print size</span>
               <div class="print-size-toolbar" id="printSizeToolbar"></div>
               <select id="printSizeSelect">
                 <option value="landscape-10x8">Landscape picture book 12 x 8 in</option>
                 <option value="portrait-8x10">Portrait picture book 8 x 12 in</option>
+                <option value="portrait-8.5x11">Portrait picture book 8.5 x 11 in</option>
                 <option value="square-10x10">Square picture book 10 x 10 in</option>
               </select>
             </label>
 
-            <div class="cover-preview" id="coverPreview">
-              <div class="empty-state">No cover loaded</div>
+            <div class="field book-state-controls">
+              <span>Book revisions</span>
+              <div class="inline-control">
+                <input id="bookStateName" type="text" placeholder="Revision name (optional)" />
+                <button class="ghost-button" id="saveBookStateButton" type="button">Save Revision</button>
+              </div>
+              <select id="bookStateSelect" aria-label="Book revisions"></select>
+              <div class="button-row">
+                <button class="ghost-button" id="restoreBookStateButton" type="button">Restore</button>
+                <button class="ghost-button danger-button" id="deleteBookStateButton" type="button">Delete</button>
+              </div>
             </div>
 
-            <button class="ghost-button full-width" id="clearCoverButton" type="button">Clear cover</button>
-
-            <label class="field">
-              <span>Back cover summary</span>
-              <textarea id="backCoverSummary" rows="5" placeholder="Write the short summary that should appear on the back of the book."></textarea>
-            </label>
           </section>
 
           <section class="stack page-list-section">
@@ -190,7 +189,7 @@
               </label>
 
               <label class="field">
-                <span>Page count</span>
+                <span id="pageCountLabel">Page count</span>
                 <input id="suggestedPageCount" type="number" min="1" max="64" placeholder="Auto" />
               </label>
 
@@ -199,7 +198,7 @@
                 <textarea
                   id="storyManuscript"
                   rows="8"
-                  placeholder="Paste the whole story here, then create page drafts..."
+                  placeholder="Paste the whole story here, then create page drafts."
                 ></textarea>
               </label>
             </div>
@@ -212,6 +211,8 @@
                 <h2 id="activePageLabel">Page 1</h2>
               </div>
               <div class="button-row">
+                <button class="ghost-button" id="addPageBeforeButton" type="button">Add Page Before</button>
+                <button class="ghost-button" id="addPageAfterButton" type="button">Add Page After</button>
                 <button class="ghost-button" id="duplicatePageButton" type="button">Duplicate</button>
                 <button class="ghost-button danger-button" id="deletePageButton" type="button">Delete</button>
               </div>
@@ -248,7 +249,7 @@
                 <input id="pageLighting" type="text" placeholder="Warm afternoon light" />
               </label>
 
-              <label class="field span-2">
+              <label class="field span-2" id="textSpaceField">
                 <span>Text placement</span>
                 <input id="textSpace" type="text" placeholder="Leave quiet open space at top left for the story text." />
               </label>
@@ -375,6 +376,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=physical-page-scale"></script>
   </body>
 </html>

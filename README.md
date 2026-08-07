@@ -1,4 +1,4 @@
-# Whoka Story Studio
+# WHOKA Story Studio
 
 A local authoring website for drafting a picture book page by page, then generating illustrations from your page text, character names, and scene direction.
 
@@ -19,8 +19,8 @@ A local authoring website for drafting a picture book page by page, then generat
 ## How to use
 
 1. Set `OPENAI_API_KEY` in your environment.
-2. Run `serve.bat` from this folder, or start `python server.py 8000`.
-3. Open `http://127.0.0.1:8000`.
+2. Run `serve.bat` from this folder, or start `python server.py 8001`.
+3. Open `http://127.0.0.1:8001`.
 4. Use `Start new book`, enter the title, author, target audience, and paste the story.
 5. Click `Create book pages` to divide the manuscript into page drafts.
 6. Review or edit each page's text, character names, and illustration direction, then click `Generate illustration`.
@@ -31,16 +31,16 @@ A local authoring website for drafting a picture book page by page, then generat
 By default the app only listens on this computer. To open it from another computer on the same network, start it on all interfaces:
 
 ```powershell
-python server.py 8000 0.0.0.0
+python server.py 8001 0.0.0.0
 ```
 
 Or with the batch file:
 
 ```powershell
-.\serve.bat 8000 0.0.0.0
+.\serve.bat 8001 0.0.0.0
 ```
 
-Then open `http://<this-computer-ip>:8000` from the other computer. Windows Firewall may ask you to allow Python on private networks.
+Then open `http://<this-computer-ip>:8001` from the other computer. Windows Firewall may ask you to allow Python on private networks.
 
 ## CLI commands
 
@@ -49,6 +49,14 @@ Generate a full page scene:
 ```powershell
 python bookgen.py page --page-number 5 --characters Layla Ginger --scene "Layla and Ginger are having a playful tug-of-war over a bone in the dirt yard." --setting "A rustic yard with packed dirt and dry grass around the edges." --mood "Playful and mischievous." --text-space "Quiet open space at top left." --show-prompt
 ```
+
+Generate a page illustration and save it straight into `outputs/pages/` in one step:
+
+```powershell
+.\generate-art.ps1 -Kind page -PageNumber 5 -Characters Layla, Ginger -Scene "Layla and Ginger are having a playful tug-of-war over a bone in the dirt yard." -Setting "A rustic yard with packed dirt and dry grass around the edges." -Mood "Playful and mischievous." -TextSpace "Quiet open space at top left."
+```
+
+The helper automatically uses the active saved book's title, cover reference, print size, selected page layout, scene-style settings, and full profiles for explicitly listed or scene-mentioned characters. Command arguments override the saved page values when supplied.
 
 Generate a transparent character PNG like the browser app:
 
